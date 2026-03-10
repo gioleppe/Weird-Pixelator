@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import filedialog, messagebox, simpledialog
+from tkinter import filedialog, messagebox, simpledialog, ttk
 import os
 from PIL import Image, ImageTk, ImageFilter, ImageOps
 import numpy as np
@@ -34,246 +34,437 @@ class App:
         self.animation_frames = []
         self.animation_preview_images = []
         self.animation_status_var = tk.StringVar(value="No frames added yet.")
+        self.invert_state = tk.BooleanVar(value=False)
+        self.folder_path = tk.StringVar()
+        self.blend_filename_var = tk.StringVar(value="No file")
+        self.preview_title_var = tk.StringVar(value="No image loaded")
+        self.preview_hint_var = tk.StringVar(value="Upload an image to start creating a glitchy preview.")
+        self._slider_value_bindings = []
+        self.theme = {
+            "bg": "#15181e",
+            "panel": "#1d2129",
+            "panel_alt": "#242935",
+            "panel_soft": "#202530",
+            "border": "#32394a",
+            "text": "#f4f6fb",
+            "muted": "#9ea8ba",
+            "canvas": "#0f1217",
+            "field": "#13171f",
+            "field_border": "#3b4356",
+            "accent": "#6e8cff",
+            "accent_soft": "#55637d",
+            "button": "#353e50",
+            "button_alt": "#2b3241",
+        }
 
-        # Canvas for displaying the image
-        self.canvas = tk.Canvas(root, width=400, height=400, bg="gray")
-        self.canvas.pack(pady=10)
+        self.root.configure(bg=self.theme["bg"])
+        self.root.geometry("1080x720")
+        self.root.minsize(920, 660)
+        self._configure_notebook_style()
 
-        # Button to upload image
-        self.upload_button = tk.Button(root, text="Upload Image", command=self.upload_image, **self._button_style("#444"))
-        self.upload_button.pack(pady=5)
+        self.app_shell = tk.Frame(root, bg=self.theme["bg"])
+        self.app_shell.pack(fill=tk.BOTH, expand=True, padx=12, pady=12)
+        self.app_shell.grid_columnconfigure(0, weight=3)
+        self.app_shell.grid_columnconfigure(1, weight=2, minsize=360)
+        self.app_shell.grid_rowconfigure(1, weight=1)
 
-        # --- Main Controls Container ---
-        self.main_controls_container = tk.Frame(root)
-        self.main_controls_container.pack(pady=10, padx=10, fill=tk.BOTH, expand=True)
+        self._build_header()
+        self._build_preview_panel()
+        self._build_control_sidebar()
+        self._sync_crop_controls_to_image(reset_values=True)
+        self._refresh_animation_preview_strip()
+        self._render_empty_preview()
 
-        # Correctly configure the grid layout for all sections
-        self.main_controls_container.grid_columnconfigure(0, weight=1)
-        self.main_controls_container.grid_columnconfigure(1, weight=1)
-        self.main_controls_container.grid_columnconfigure(2, weight=1)
-        self.main_controls_container.grid_columnconfigure(3, weight=1)
-        self.main_controls_container.grid_columnconfigure(4, weight=1)
-        self.main_controls_container.grid_columnconfigure(5, weight=1)
-        self.main_controls_container.grid_rowconfigure(0, weight=1)
-        self.main_controls_container.grid_rowconfigure(1, weight=1)
-        self.main_controls_container.grid_rowconfigure(2, weight=0)
+    def _configure_notebook_style(self):
+        """
+        Configure a compact dark notebook style for the right sidebar tabs.
+        """
+        style = ttk.Style(self.root)
+        try:
+            style.theme_use("clam")
+        except tk.TclError:
+            pass
 
-        # --- Pixelate Section ---
-        self.pixelate_frame = tk.LabelFrame(
-            self.main_controls_container, 
-            text="Pixelate", 
-            padx=10, pady=10,
-            fg="white", bg="#2e2e2e", # Dark background for better contrast
-            highlightbackground="white", highlightthickness=1
+        style.configure("Weird.TNotebook", background=self.theme["bg"], borderwidth=0, tabmargins=(0, 0, 0, 0))
+        style.configure(
+            "Weird.TNotebook.Tab",
+            background=self.theme["panel_soft"],
+            foreground=self.theme["muted"],
+            padding=(14, 8),
+            borderwidth=0,
+            focuscolor=self.theme["panel_soft"],
         )
-        self.pixelate_frame.grid(row=0, column=0, sticky="nsew", padx=5)
-        root.configure(bg="#2e2e2e") # Set app background
-
-        # Glitch Styles inside Pixelate Section
-        tk.Label(self.pixelate_frame, text="Row Jitter:", fg="white", bg="#2e2e2e").grid(row=0, column=0, sticky="w")
-        self.jitter_slider = tk.Scale(self.pixelate_frame, from_=0, to=100, orient=tk.HORIZONTAL, bg="#2e2e2e", fg="white", troughcolor="#444", command=self.update_effects)
-        self.jitter_slider.set(0)
-        self.jitter_slider.grid(row=0, column=1, sticky="ew", padx=5)
-
-        tk.Label(self.pixelate_frame, text="Block Shift:", fg="white", bg="#2e2e2e").grid(row=1, column=0, sticky="w")
-        self.block_slider = tk.Scale(self.pixelate_frame, from_=0, to=100, orient=tk.HORIZONTAL, bg="#2e2e2e", fg="white", troughcolor="#444", command=self.update_effects)
-        self.block_slider.set(0)
-        self.block_slider.grid(row=1, column=1, sticky="ew", padx=5)
-
-        tk.Label(self.pixelate_frame, text="Pixel Sort:", fg="white", bg="#2e2e2e").grid(row=2, column=0, sticky="w")
-        self.sort_slider = tk.Scale(self.pixelate_frame, from_=0, to=100, orient=tk.HORIZONTAL, bg="#2e2e2e", fg="white", troughcolor="#444", command=self.update_effects)
-        self.sort_slider.set(0)
-        self.sort_slider.grid(row=2, column=1, sticky="ew", padx=5)
-
-        tk.Label(self.pixelate_frame, text="Pixelate:", fg="white", bg="#2e2e2e").grid(row=3, column=0, sticky="w")
-        self.pixel_slider = tk.Scale(self.pixelate_frame, from_=1.0, to=0.01, resolution=0.01, orient=tk.HORIZONTAL, bg="#2e2e2e", fg="white", troughcolor="#444", command=self.update_effects)
-        self.pixel_slider.set(1.0)
-        self.pixel_slider.grid(row=3, column=1, sticky="ew", padx=5)
-
-        self.pixelate_frame.columnconfigure(1, weight=1)
-
-        # --- CRT Section ---
-        self.crt_frame = tk.LabelFrame(
-            self.main_controls_container,
-            text="CRT",
-            padx=10, pady=10,
-            fg="white", bg="#2e2e2e",
-            highlightbackground="white", highlightthickness=1
+        style.map(
+            "Weird.TNotebook.Tab",
+            background=[("selected", self.theme["accent_soft"]), ("active", self.theme["panel_alt"])],
+            foreground=[("selected", self.theme["text"]), ("active", self.theme["text"])],
         )
-        self.crt_frame.grid(row=1, column=0, columnspan=4, sticky="nsew", padx=5, pady=(5, 0))
 
-        for col in range(4):
-            self.crt_frame.grid_columnconfigure(col, weight=1)
+    def _build_header(self):
+        """
+        Build the compact top bar.
+        """
+        self.header_frame = tk.Frame(self.app_shell, bg=self.theme["bg"])
+        self.header_frame.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 12))
+        self.header_frame.grid_columnconfigure(0, weight=1)
 
-        tk.Label(self.crt_frame, text="Curvature:", fg="white", bg="#2e2e2e").grid(row=0, column=0, sticky="w")
-        self.curvature_slider = tk.Scale(
-            self.crt_frame,
-            from_=0, to=100,
-            resolution=1,
-            orient=tk.HORIZONTAL,
-            bg="#2e2e2e", fg="white", troughcolor="#444",
-            command=self.update_crt
+        title_block = tk.Frame(self.header_frame, bg=self.theme["bg"])
+        title_block.grid(row=0, column=0, sticky="w")
+
+        tk.Label(
+            title_block,
+            text="Weird Pixelator",
+            fg=self.theme["text"],
+            bg=self.theme["bg"],
+            font=("Helvetica", 20, "bold")
+        ).pack(anchor="w")
+        tk.Label(
+            title_block,
+            text="Compact glitch controls with a cleaner preview workflow.",
+            fg=self.theme["muted"],
+            bg=self.theme["bg"],
+            font=("Helvetica", 10)
+        ).pack(anchor="w", pady=(2, 0))
+
+        actions = tk.Frame(self.header_frame, bg=self.theme["bg"])
+        actions.grid(row=0, column=1, sticky="e")
+
+        self.upload_button = tk.Button(
+            actions,
+            text="Upload Image",
+            command=self.upload_image,
+            **self._button_style(self.theme["button"])
         )
-        self.curvature_slider.set(0)
-        self.curvature_slider.grid(row=0, column=1, sticky="ew", padx=5)
+        self.upload_button.pack(side=tk.LEFT, padx=(0, 8))
 
-        tk.Label(self.crt_frame, text="Distortion:", fg="white", bg="#2e2e2e").grid(row=0, column=2, sticky="w")
-        self.distortion_slider = tk.Scale(
-            self.crt_frame,
-            from_=0, to=100,
-            resolution=1,
-            orient=tk.HORIZONTAL,
-            bg="#2e2e2e", fg="white", troughcolor="#444",
-            command=self.update_crt
+        self.save_button = tk.Button(
+            actions,
+            text="Save Image",
+            command=self.save_image,
+            **self._button_style(self.theme["accent_soft"])
         )
-        self.distortion_slider.set(0)
-        self.distortion_slider.grid(row=0, column=3, sticky="ew", padx=5)
+        self.save_button.pack(side=tk.LEFT, padx=(0, 8))
 
-        tk.Label(self.crt_frame, text="Glow:", fg="white", bg="#2e2e2e").grid(row=1, column=0, sticky="w")
-        self.glow_slider = tk.Scale(
-            self.crt_frame,
-            from_=0, to=100,
-            resolution=1,
-            orient=tk.HORIZONTAL,
-            bg="#2e2e2e", fg="white", troughcolor="#444",
-            command=self.update_crt
+        self.randomize_settings_button = tk.Button(
+            actions,
+            text="Randomize Settings",
+            command=self.open_randomize_settings,
+            **self._button_style(self.theme["button_alt"])
         )
-        self.glow_slider.set(0)
-        self.glow_slider.grid(row=1, column=1, sticky="ew", padx=5)
+        self.randomize_settings_button.pack(side=tk.LEFT)
 
-        tk.Label(self.crt_frame, text="Noise:", fg="white", bg="#2e2e2e").grid(row=1, column=2, sticky="w")
-        self.noise_slider = tk.Scale(
-            self.crt_frame,
-            from_=0, to=100,
-            resolution=1,
-            orient=tk.HORIZONTAL,
-            bg="#2e2e2e", fg="white", troughcolor="#444",
-            command=self.update_crt
+    def _build_preview_panel(self):
+        """
+        Build the left preview area.
+        """
+        self.preview_frame, preview_body = self._create_card(
+            self.app_shell,
+            "Preview",
+            self.preview_hint_var,
+            stretch=True
         )
-        self.noise_slider.set(0)
-        self.noise_slider.grid(row=1, column=3, sticky="ew", padx=5)
+        self.preview_frame.grid(row=1, column=0, sticky="nsew", padx=(0, 12))
+        self.preview_frame.grid_rowconfigure(1, weight=1)
+        self.preview_frame.grid_columnconfigure(0, weight=1)
 
-        tk.Label(self.crt_frame, text="RGB Shift:", fg="white", bg="#2e2e2e").grid(row=2, column=0, sticky="w")
-        self.rgb_shift_slider = tk.Scale(
-            self.crt_frame,
-            from_=0, to=20,
-            resolution=1,
-            orient=tk.HORIZONTAL,
-            bg="#2e2e2e", fg="white", troughcolor="#444",
-            command=self.update_crt
+        tk.Label(
+            preview_body,
+            textvariable=self.preview_title_var,
+            fg=self.theme["text"],
+            bg=self.theme["panel"],
+            font=("Helvetica", 13, "bold"),
+            anchor="w"
+        ).pack(anchor="w")
+
+        self.canvas_wrap = tk.Frame(
+            preview_body,
+            bg=self.theme["canvas"],
+            highlightbackground=self.theme["border"],
+            highlightthickness=1,
+            bd=0
         )
-        self.rgb_shift_slider.set(0)
-        self.rgb_shift_slider.grid(row=2, column=1, sticky="ew", padx=5)
+        self.canvas_wrap.configure(width=430, height=430)
+        self.canvas_wrap.pack_propagate(False)
+        self.canvas_wrap.pack(pady=(10, 0), anchor="center")
 
-        tk.Label(self.crt_frame, text="Scanlines:", fg="white", bg="#2e2e2e").grid(row=2, column=2, sticky="w")
-        self.scanline_slider = tk.Scale(
-            self.crt_frame,
-            from_=0, to=100,
-            orient=tk.HORIZONTAL,
-            bg="#2e2e2e", fg="white", troughcolor="#444",
-            command=self.update_crt
+        self.canvas = tk.Canvas(
+            self.canvas_wrap,
+            width=400,
+            height=400,
+            bg=self.theme["canvas"],
+            bd=0,
+            highlightthickness=0
         )
-        self.scanline_slider.set(0)
-        self.scanline_slider.grid(row=2, column=3, sticky="ew", padx=5)
+        self.canvas.pack(fill=tk.BOTH, expand=True, padx=12, pady=12)
 
-        tk.Label(self.crt_frame, text="Vignette:", fg="white", bg="#2e2e2e").grid(row=3, column=0, sticky="w")
-        self.vignette_slider = tk.Scale(
-            self.crt_frame,
-            from_=0, to=100,
-            resolution=1,
-            orient=tk.HORIZONTAL,
-            bg="#2e2e2e", fg="white", troughcolor="#444",
-            command=self.update_crt
+        tk.Label(
+            preview_body,
+            text="Live preview updates automatically while you tweak controls.",
+            fg=self.theme["muted"],
+            bg=self.theme["panel"],
+            font=("Helvetica", 10)
+        ).pack(anchor="w", pady=(10, 0))
+
+    def _build_control_sidebar(self):
+        """
+        Build the compact tabbed control sidebar.
+        """
+        self.sidebar_frame = tk.Frame(self.app_shell, bg=self.theme["bg"])
+        self.sidebar_frame.grid(row=1, column=1, sticky="nsew")
+        self.sidebar_frame.grid_rowconfigure(0, weight=1)
+        self.sidebar_frame.grid_columnconfigure(0, weight=1)
+
+        self.controls_notebook = ttk.Notebook(self.sidebar_frame, style="Weird.TNotebook")
+        self.controls_notebook.grid(row=0, column=0, sticky="nsew")
+
+        self.edit_tab = tk.Frame(self.controls_notebook, bg=self.theme["bg"])
+        self.finish_tab = tk.Frame(self.controls_notebook, bg=self.theme["bg"])
+        self.crop_tab = tk.Frame(self.controls_notebook, bg=self.theme["bg"])
+        self.animate_tab = tk.Frame(self.controls_notebook, bg=self.theme["bg"])
+
+        self.controls_notebook.add(self.edit_tab, text="Adjust")
+        self.controls_notebook.add(self.finish_tab, text="Finish")
+        self.controls_notebook.add(self.crop_tab, text="Crop")
+        self.controls_notebook.add(self.animate_tab, text="Animate")
+
+        self._build_adjust_tab()
+        self._build_finish_tab()
+        self._build_crop_tab()
+        self._build_animation_tab()
+
+    def _build_adjust_tab(self):
+        """
+        Build the main effect controls tab.
+        """
+        self.edit_tab.grid_columnconfigure(0, weight=1)
+        self.edit_tab.grid_columnconfigure(1, weight=1)
+
+        self.pixelate_frame, pixelate_body = self._create_card(self.edit_tab, "Pixelate")
+        self.pixelate_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 6), pady=(0, 8))
+        self.jitter_slider = self._create_compact_slider(pixelate_body, "Row Jitter", 0, 100, self.update_effects, initial=0)
+        self.block_slider = self._create_compact_slider(pixelate_body, "Block Shift", 0, 100, self.update_effects, initial=0)
+        self.sort_slider = self._create_compact_slider(pixelate_body, "Pixel Sort", 0, 100, self.update_effects, initial=0)
+        self.pixel_slider = self._create_compact_slider(
+            pixelate_body,
+            "Pixelate",
+            1.0,
+            0.01,
+            self.update_effects,
+            resolution=0.01,
+            initial=1.0,
+            formatter=lambda value: f"{float(value):.2f}"
         )
-        self.vignette_slider.set(0)
-        self.vignette_slider.grid(row=3, column=1, sticky="ew", padx=5)
 
-        # --- Crop Section ---
-        self.crop_frame = tk.LabelFrame(
-            self.main_controls_container,
-            text="Crop",
-            padx=10, pady=10,
-            fg="white", bg="#2e2e2e",
-            highlightbackground="white", highlightthickness=1
+        self.colorize_frame, colorize_body = self._create_card(self.edit_tab, "Colorize")
+        self.colorize_frame.grid(row=0, column=1, sticky="nsew", padx=(6, 0), pady=(0, 8))
+        self.hue_slider = self._create_compact_slider(colorize_body, "Hue Shift", -180, 180, self.update_colorize, initial=0)
+        self.saturation_slider = self._create_compact_slider(
+            colorize_body,
+            "Saturation",
+            0.0,
+            2.0,
+            self.update_colorize,
+            resolution=0.1,
+            initial=1.0,
+            formatter=lambda value: f"{float(value):.1f}"
         )
-        self.crop_frame.grid(row=1, column=4, columnspan=2, sticky="nsew", padx=5, pady=(5, 0))
-        for col in range(4):
-            self.crop_frame.grid_columnconfigure(col, weight=1)
-
-        tk.Label(self.crop_frame, text="Left:", fg="white", bg="#2e2e2e").grid(row=0, column=0, sticky="w")
-        self.crop_left_slider = tk.Scale(
-            self.crop_frame,
-            from_=0, to=0,
-            resolution=1,
-            orient=tk.HORIZONTAL,
-            bg="#2e2e2e", fg="white", troughcolor="#444",
-            command=lambda _value: self.update_crop("left")
+        self.contrast_slider = self._create_compact_slider(
+            colorize_body,
+            "Contrast",
+            0.5,
+            2.0,
+            self.update_colorize,
+            resolution=0.1,
+            initial=1.0,
+            formatter=lambda value: f"{float(value):.1f}"
         )
-        self.crop_left_slider.set(0)
-        self.crop_left_slider.grid(row=1, column=0, sticky="ew", padx=5)
-
-        self.crop_left_entry = tk.Entry(self.crop_frame, textvariable=self.crop_left_var, bg="#444", fg="white", insertbackground="white", width=8)
-        self.crop_left_entry.grid(row=2, column=0, sticky="ew", padx=5)
-        self.crop_left_entry.bind("<Return>", lambda _event: self.commit_crop_entry("left"))
-        self.crop_left_entry.bind("<FocusOut>", lambda _event: self.commit_crop_entry("left"))
-
-        tk.Label(self.crop_frame, text="Right:", fg="white", bg="#2e2e2e").grid(row=0, column=1, sticky="w")
-        self.crop_right_slider = tk.Scale(
-            self.crop_frame,
-            from_=0, to=0,
-            resolution=1,
-            orient=tk.HORIZONTAL,
-            bg="#2e2e2e", fg="white", troughcolor="#444",
-            command=lambda _value: self.update_crop("right")
+        self.invert_button = tk.Checkbutton(
+            colorize_body,
+            text="Invert Colors",
+            variable=self.invert_state,
+            command=self.toggle_invert,
+            bg=self.theme["panel"],
+            fg=self.theme["text"],
+            activebackground=self.theme["panel"],
+            activeforeground=self.theme["text"],
+            selectcolor=self.theme["field"],
+            highlightthickness=0,
+            bd=0,
+            anchor="w"
         )
-        self.crop_right_slider.set(0)
-        self.crop_right_slider.grid(row=1, column=1, sticky="ew", padx=5)
+        self.invert_button.pack(fill=tk.X, pady=(4, 0))
 
-        self.crop_right_entry = tk.Entry(self.crop_frame, textvariable=self.crop_right_var, bg="#444", fg="white", insertbackground="white", width=8)
-        self.crop_right_entry.grid(row=2, column=1, sticky="ew", padx=5)
-        self.crop_right_entry.bind("<Return>", lambda _event: self.commit_crop_entry("right"))
-        self.crop_right_entry.bind("<FocusOut>", lambda _event: self.commit_crop_entry("right"))
-
-        tk.Label(self.crop_frame, text="Top:", fg="white", bg="#2e2e2e").grid(row=0, column=2, sticky="w")
-        self.crop_top_slider = tk.Scale(
-            self.crop_frame,
-            from_=0, to=0,
-            resolution=1,
-            orient=tk.HORIZONTAL,
-            bg="#2e2e2e", fg="white", troughcolor="#444",
-            command=lambda _value: self.update_crop("top")
+        self.randomize_frame, randomize_body = self._create_card(self.edit_tab, "Randomize")
+        self.randomize_frame.grid(row=1, column=0, sticky="nsew", padx=(0, 6), pady=(0, 8))
+        self.randomize_button = tk.Button(
+            randomize_body,
+            text="Randomize Effects",
+            command=self.randomize_effects,
+            **self._button_style(self.theme["button"])
         )
-        self.crop_top_slider.set(0)
-        self.crop_top_slider.grid(row=1, column=2, sticky="ew", padx=5)
-
-        self.crop_top_entry = tk.Entry(self.crop_frame, textvariable=self.crop_top_var, bg="#444", fg="white", insertbackground="white", width=8)
-        self.crop_top_entry.grid(row=2, column=2, sticky="ew", padx=5)
-        self.crop_top_entry.bind("<Return>", lambda _event: self.commit_crop_entry("top"))
-        self.crop_top_entry.bind("<FocusOut>", lambda _event: self.commit_crop_entry("top"))
-
-        tk.Label(self.crop_frame, text="Bottom:", fg="white", bg="#2e2e2e").grid(row=0, column=3, sticky="w")
-        self.crop_bottom_slider = tk.Scale(
-            self.crop_frame,
-            from_=0, to=0,
-            resolution=1,
-            orient=tk.HORIZONTAL,
-            bg="#2e2e2e", fg="white", troughcolor="#444",
-            command=lambda _value: self.update_crop("bottom")
+        self.randomize_button.pack(fill=tk.X)
+        self.random_pixel_slider = self._create_compact_slider(
+            randomize_body,
+            "Random Pixels",
+            0.0,
+            1.0,
+            self.update_random_pixels,
+            resolution=0.01,
+            initial=0.0,
+            formatter=lambda value: f"{float(value):.2f}"
         )
-        self.crop_bottom_slider.set(0)
-        self.crop_bottom_slider.grid(row=1, column=3, sticky="ew", padx=5)
+        self.randomize_settings_inline = tk.Button(
+            randomize_body,
+            text="Choose Randomized Controls",
+            command=self.open_randomize_settings,
+            **self._button_style(self.theme["button_alt"])
+        )
+        self.randomize_settings_inline.pack(fill=tk.X, pady=(6, 0))
 
-        self.crop_bottom_entry = tk.Entry(self.crop_frame, textvariable=self.crop_bottom_var, bg="#444", fg="white", insertbackground="white", width=8)
-        self.crop_bottom_entry.grid(row=2, column=3, sticky="ew", padx=5)
-        self.crop_bottom_entry.bind("<Return>", lambda _event: self.commit_crop_entry("bottom"))
-        self.crop_bottom_entry.bind("<FocusOut>", lambda _event: self.commit_crop_entry("bottom"))
+        self.confuser_frame, confuser_body = self._create_card(self.edit_tab, "Confuser")
+        self.confuser_frame.grid(row=1, column=1, sticky="nsew", padx=(6, 0), pady=(0, 8))
+        self.blur_slider = self._create_compact_slider(confuser_body, "Blur", 0, 10, self.update_confuser, initial=0)
+        self.color_reducer_slider = self._create_compact_slider(confuser_body, "Color Reducer", 2, 256, self.update_confuser, initial=256)
+        self.legacy_color_slider = self._create_compact_slider(confuser_body, "Color Collapse", 2, 256, self.update_confuser, initial=256)
 
-        self.crop_size_label = tk.Label(self.crop_frame, textvariable=self.crop_size_var, fg="#c8c8c8", bg="#2e2e2e")
-        self.crop_size_label.grid(row=3, column=0, columnspan=2, sticky="w", padx=5, pady=(6, 0))
+        self.blend_frame, blend_body = self._create_card(self.edit_tab, "Blend")
+        self.blend_frame.grid(row=2, column=0, columnspan=2, sticky="nsew")
+        self.upload_blend_button = tk.Button(
+            blend_body,
+            text="Upload Blend Image",
+            command=self.upload_blend_image,
+            **self._button_style(self.theme["button"])
+        )
+        self.upload_blend_button.pack(fill=tk.X)
+        tk.Label(
+            blend_body,
+            textvariable=self.blend_filename_var,
+            fg=self.theme["muted"],
+            bg=self.theme["panel"],
+            anchor="w"
+        ).pack(fill=tk.X, pady=(6, 2))
+        self.blend_slider = self._create_compact_slider(
+            blend_body,
+            "Blend Factor",
+            0.0,
+            1.0,
+            self.update_blend,
+            resolution=0.01,
+            initial=0.0,
+            formatter=lambda value: f"{float(value):.2f}"
+        )
 
-        tk.Label(self.crop_frame, text="Preset:", fg="#c8c8c8", bg="#2e2e2e").grid(row=3, column=2, sticky="e", padx=(5, 0), pady=(6, 0))
+    def _build_finish_tab(self):
+        """
+        Build the finishing and export controls tab.
+        """
+        self.finish_tab.grid_columnconfigure(0, weight=1)
+
+        self.crt_frame, crt_body = self._create_card(self.finish_tab, "CRT Finish")
+        self.crt_frame.grid(row=0, column=0, sticky="nsew", pady=(0, 8))
+
+        crt_grid = tk.Frame(crt_body, bg=self.theme["panel"])
+        crt_grid.pack(fill=tk.X)
+        crt_grid.grid_columnconfigure(0, weight=1)
+        crt_grid.grid_columnconfigure(1, weight=1)
+
+        crt_left = tk.Frame(crt_grid, bg=self.theme["panel"])
+        crt_left.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
+        crt_right = tk.Frame(crt_grid, bg=self.theme["panel"])
+        crt_right.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
+
+        self.curvature_slider = self._create_compact_slider(crt_left, "Curvature", 0, 100, self.update_crt, initial=0)
+        self.glow_slider = self._create_compact_slider(crt_left, "Glow", 0, 100, self.update_crt, initial=0)
+        self.rgb_shift_slider = self._create_compact_slider(crt_left, "RGB Shift", 0, 20, self.update_crt, initial=0)
+        self.vignette_slider = self._create_compact_slider(crt_left, "Vignette", 0, 100, self.update_crt, initial=0)
+
+        self.distortion_slider = self._create_compact_slider(crt_right, "Distortion", 0, 100, self.update_crt, initial=0)
+        self.noise_slider = self._create_compact_slider(crt_right, "Noise", 0, 100, self.update_crt, initial=0)
+        self.scanline_slider = self._create_compact_slider(crt_right, "Scanlines", 0, 100, self.update_crt, initial=0)
+
+        self.export_frame, export_body = self._create_card(self.finish_tab, "Export")
+        self.export_frame.grid(row=1, column=0, sticky="nsew")
+        tk.Label(export_body, text="Save Style", fg=self.theme["text"], bg=self.theme["panel"], anchor="w").pack(fill=tk.X)
+        self.export_compression_menu = tk.OptionMenu(
+            export_body,
+            self.export_compression_var,
+            "No Compression",
+            "Soft CCD",
+            "Compact Camera",
+            "Memory Saver",
+            "Harsh Artifacts",
+            command=self.update_export_compression
+        )
+        self._style_option_menu(self.export_compression_menu)
+        self.export_compression_menu.pack(fill=tk.X, pady=(4, 8))
+
+        tk.Label(export_body, text="Save Folder", fg=self.theme["text"], bg=self.theme["panel"], anchor="w").pack(fill=tk.X)
+        folder_row = tk.Frame(export_body, bg=self.theme["panel"])
+        folder_row.pack(fill=tk.X, pady=(4, 0))
+        self.folder_entry = tk.Entry(folder_row, textvariable=self.folder_path, **self._entry_style())
+        self.folder_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.browse_button = tk.Button(
+            folder_row,
+            text="Browse",
+            command=self.select_folder,
+            **self._button_style(self.theme["button_alt"])
+        )
+        self.browse_button.pack(side=tk.LEFT, padx=(8, 0))
+
+        button_row = tk.Frame(export_body, bg=self.theme["panel"])
+        button_row.pack(fill=tk.X, pady=(10, 0))
+        tk.Button(
+            button_row,
+            text="Save PNG",
+            command=self.save_image,
+            **self._button_style(self.theme["button"])
+        ).pack(side=tk.LEFT)
+        tk.Label(
+            export_body,
+            text="Compression affects preview and final export.",
+            fg=self.theme["muted"],
+            bg=self.theme["panel"],
+            anchor="w"
+        ).pack(fill=tk.X, pady=(8, 0))
+
+    def _build_crop_tab(self):
+        """
+        Build the crop controls tab.
+        """
+        self.crop_tab.grid_columnconfigure(0, weight=1)
+        self.crop_frame, crop_body = self._create_card(self.crop_tab, "Crop & Aspect")
+        self.crop_frame.grid(row=0, column=0, sticky="nsew")
+
+        crop_grid = tk.Frame(crop_body, bg=self.theme["panel"])
+        crop_grid.pack(fill=tk.X)
+        crop_grid.grid_columnconfigure(0, weight=1)
+        crop_grid.grid_columnconfigure(1, weight=1)
+
+        self.crop_left_slider, self.crop_left_entry = self._create_crop_control(crop_grid, 0, 0, "left", "Left")
+        self.crop_right_slider, self.crop_right_entry = self._create_crop_control(crop_grid, 0, 1, "right", "Right")
+        self.crop_top_slider, self.crop_top_entry = self._create_crop_control(crop_grid, 1, 0, "top", "Top")
+        self.crop_bottom_slider, self.crop_bottom_entry = self._create_crop_control(crop_grid, 1, 1, "bottom", "Bottom")
+
+        footer = tk.Frame(crop_body, bg=self.theme["panel"])
+        footer.pack(fill=tk.X, pady=(8, 0))
+        footer.grid_columnconfigure(0, weight=1)
+        footer.grid_columnconfigure(1, weight=0)
+
+        self.crop_size_label = tk.Label(
+            footer,
+            textvariable=self.crop_size_var,
+            fg=self.theme["muted"],
+            bg=self.theme["panel"],
+            anchor="w"
+        )
+        self.crop_size_label.grid(row=0, column=0, sticky="w")
+
+        preset_row = tk.Frame(footer, bg=self.theme["panel"])
+        preset_row.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        preset_row.grid_columnconfigure(1, weight=1)
+        tk.Label(preset_row, text="Preset", fg=self.theme["text"], bg=self.theme["panel"]).grid(row=0, column=0, sticky="w", padx=(0, 8))
         self.crop_preset_menu = tk.OptionMenu(
-            self.crop_frame,
+            preset_row,
             self.crop_preset_var,
             "Free",
             "1:1",
@@ -284,314 +475,317 @@ class App:
             "21:9",
             command=self.apply_crop_preset
         )
-        self.crop_preset_menu.configure(bg="#444", fg="white", activebackground="#555", activeforeground="white", highlightthickness=0)
-        self.crop_preset_menu["menu"].configure(bg="#444", fg="white")
-        self.crop_preset_menu.grid(row=3, column=3, sticky="ew", padx=5, pady=(6, 0))
+        self._style_option_menu(self.crop_preset_menu)
+        self.crop_preset_menu.grid(row=0, column=1, sticky="ew")
 
         self.reset_crop_button = tk.Button(
-            self.crop_frame,
+            crop_body,
             text="Reset Crop",
             command=self.reset_crop,
-            **self._button_style("#444")
+            **self._button_style(self.theme["button_alt"])
         )
-        self.reset_crop_button.grid(row=4, column=0, columnspan=4, sticky="ew", padx=5, pady=(8, 0))
+        self.reset_crop_button.pack(fill=tk.X, pady=(10, 0))
 
-        # --- Animation Section ---
-        self.animation_frame = tk.LabelFrame(
-            self.main_controls_container,
-            text="Animation",
-            padx=10, pady=10,
-            fg="white", bg="#2e2e2e",
-            highlightbackground="white", highlightthickness=1
-        )
-        self.animation_frame.grid(row=2, column=0, columnspan=6, sticky="nsew", padx=5, pady=(8, 0))
-        self.animation_frame.grid_columnconfigure(0, weight=1)
+    def _build_animation_tab(self):
+        """
+        Build the compact animation tab without scrollbars.
+        """
+        self.animate_tab.grid_columnconfigure(0, weight=1)
+        self.animation_frame, animation_body = self._create_card(self.animate_tab, "Animation Frames")
+        self.animation_frame.grid(row=0, column=0, sticky="nsew")
 
-        self.animation_button_row = tk.Frame(self.animation_frame, bg="#2e2e2e")
-        self.animation_button_row.grid(row=0, column=0, sticky="ew")
-        self.animation_button_row.grid_columnconfigure(3, weight=1)
-
+        self.animation_button_row = tk.Frame(animation_body, bg=self.theme["panel"])
+        self.animation_button_row.pack(fill=tk.X)
         self.add_frame_button = tk.Button(
             self.animation_button_row,
             text="Add Frame",
             command=self.add_animation_frame,
-            **self._button_style("#444")
+            **self._button_style(self.theme["button"])
         )
-        self.add_frame_button.grid(row=0, column=0, padx=(0, 6), pady=(0, 6), sticky="w")
+        self.add_frame_button.pack(side=tk.LEFT)
 
         self.delete_frame_button = tk.Button(
             self.animation_button_row,
-            text="Delete Last Frame",
+            text="Delete Last",
             command=self.delete_last_animation_frame,
-            **self._button_style("#444")
+            **self._button_style(self.theme["button_alt"])
         )
-        self.delete_frame_button.grid(row=0, column=1, padx=(0, 6), pady=(0, 6), sticky="w")
+        self.delete_frame_button.pack(side=tk.LEFT, padx=(8, 0))
 
         self.export_animation_button = tk.Button(
             self.animation_button_row,
-            text="Export Animation As",
+            text="Export",
             command=self.open_animation_export_modal,
-            **self._button_style("#666")
+            **self._button_style(self.theme["accent_soft"])
         )
-        self.export_animation_button.grid(row=0, column=2, pady=(0, 6), sticky="w")
+        self.export_animation_button.pack(side=tk.RIGHT)
 
         self.animation_status_label = tk.Label(
-            self.animation_button_row,
+            animation_body,
             textvariable=self.animation_status_var,
-            fg="#c8c8c8", bg="#2e2e2e",
-            anchor="e", justify=tk.RIGHT
+            fg=self.theme["muted"],
+            bg=self.theme["panel"],
+            anchor="w",
+            justify=tk.LEFT
         )
-        self.animation_status_label.grid(row=0, column=3, sticky="e", pady=(0, 6))
+        self.animation_status_label.pack(fill=tk.X, pady=(8, 6))
 
-        self.animation_preview_canvas = tk.Canvas(
-            self.animation_frame,
-            height=150,
-            bg="#202020",
-            highlightthickness=0,
+        self.animation_preview_inner = tk.Frame(
+            animation_body,
+            bg=self.theme["panel_soft"],
+            highlightbackground=self.theme["border"],
+            highlightthickness=1,
             bd=0
         )
-        self.animation_preview_canvas.grid(row=1, column=0, sticky="ew")
-
-        self.animation_preview_scrollbar = tk.Scrollbar(
-            self.animation_frame,
-            orient=tk.HORIZONTAL,
-            command=self.animation_preview_canvas.xview
-        )
-        self.animation_preview_scrollbar.grid(row=2, column=0, sticky="ew", pady=(6, 0))
-        self.animation_preview_canvas.configure(xscrollcommand=self.animation_preview_scrollbar.set)
-
-        self.animation_preview_inner = tk.Frame(self.animation_preview_canvas, bg="#202020")
-        self.animation_preview_window = self.animation_preview_canvas.create_window(
-            (0, 0),
-            window=self.animation_preview_inner,
-            anchor="nw"
-        )
-        self.animation_preview_inner.bind("<Configure>", self._update_animation_scroll_region)
-        self.animation_preview_canvas.bind("<Configure>", self._resize_animation_preview_window)
-
-        # --- Export Compression Section ---
-        self.export_frame = tk.LabelFrame(
-            self.main_controls_container,
-            text="Export Compression",
-            padx=10, pady=10,
-            fg="white", bg="#2e2e2e",
-            highlightbackground="white", highlightthickness=1
-        )
-        self.export_frame.grid(row=0, column=5, sticky="nsew", padx=5)
-        self.export_frame.grid_columnconfigure(0, weight=1)
-
-        tk.Label(self.export_frame, text="Save Style:", fg="white", bg="#2e2e2e").pack(anchor="w")
-        self.export_compression_menu = tk.OptionMenu(
-            self.export_frame,
-            self.export_compression_var,
-            "No Compression",
-            "Soft CCD",
-            "Compact Camera",
-            "Memory Saver",
-            "Harsh Artifacts",
-            command=self.update_export_compression
-        )
-        self.export_compression_menu.configure(bg="#444", fg="white", activebackground="#555", activeforeground="white", highlightthickness=0)
-        self.export_compression_menu["menu"].configure(bg="#444", fg="white")
-        self.export_compression_menu.pack(fill=tk.X, pady=(4, 8))
+        self.animation_preview_inner.pack(fill=tk.BOTH, expand=True)
 
         tk.Label(
-            self.export_frame,
-            text="Live preview + save",
-            fg="#c8c8c8", bg="#2e2e2e",
-            justify=tk.LEFT,
-            wraplength=160
+            animation_body,
+            text="The panel shows the latest frames so the layout stays compact.",
+            fg=self.theme["muted"],
+            bg=self.theme["panel"],
+            anchor="w"
+        ).pack(fill=tk.X, pady=(8, 0))
+
+    def _create_card(self, parent, title, subtitle=None, stretch=False):
+        """
+        Create a modern dark card container and return the card plus its body frame.
+        """
+        card = tk.Frame(
+            parent,
+            bg=self.theme["panel"],
+            highlightbackground=self.theme["border"],
+            highlightthickness=1,
+            bd=0
+        )
+        if stretch:
+            card.grid_propagate(True)
+
+        header = tk.Frame(card, bg=self.theme["panel"])
+        header.pack(fill=tk.X, padx=12, pady=(10, 6))
+        tk.Label(
+            header,
+            text=title,
+            fg=self.theme["text"],
+            bg=self.theme["panel"],
+            font=("Helvetica", 11, "bold")
         ).pack(anchor="w")
 
-        # --- Colorize Section ---
-        self.colorize_frame = tk.LabelFrame(
-            self.main_controls_container, 
-            text="Colorize", 
-            padx=10, pady=10,
-            fg="white", bg="#2e2e2e",
-            highlightbackground="white", highlightthickness=1
+        if subtitle is not None:
+            tk.Label(
+                header,
+                textvariable=subtitle if isinstance(subtitle, tk.Variable) else None,
+                text=subtitle if not isinstance(subtitle, tk.Variable) else None,
+                fg=self.theme["muted"],
+                bg=self.theme["panel"],
+                justify=tk.LEFT,
+                wraplength=340
+            ).pack(anchor="w", pady=(3, 0))
+
+        body = tk.Frame(card, bg=self.theme["panel"])
+        body.pack(fill=tk.BOTH, expand=True, padx=12, pady=(0, 12))
+        return card, body
+
+    def _style_option_menu(self, menu):
+        """
+        Apply the shared dark style to an OptionMenu.
+        """
+        if self.is_macos:
+            field_bg = "#d7dbe4"
+            text_color = "#11131a"
+            active_bg = "#c8cfdb"
+        else:
+            field_bg = self.theme["field"]
+            text_color = self.theme["text"]
+            active_bg = self.theme["panel_alt"]
+
+        menu.configure(
+            bg=field_bg,
+            fg=text_color,
+            activebackground=active_bg,
+            activeforeground=text_color,
+            highlightthickness=0,
+            bd=0,
+            width=14,
+            anchor="w"
         )
-        self.colorize_frame.grid(row=0, column=1, sticky="nsew", padx=5)
+        menu["menu"].configure(bg=field_bg, fg=text_color, activebackground=active_bg, activeforeground=text_color)
 
-        # Hue Slider
-        tk.Label(self.colorize_frame, text="Hue Shift:", fg="white", bg="#2e2e2e").grid(row=0, column=0, sticky="w")
-        self.hue_slider = tk.Scale(self.colorize_frame, from_=-180, to=180, orient=tk.HORIZONTAL, bg="#2e2e2e", fg="white", troughcolor="#444", command=self.update_colorize)
-        self.hue_slider.set(0)
-        self.hue_slider.grid(row=0, column=1, sticky="ew", padx=5)
+    def _entry_style(self):
+        """
+        Shared entry styling.
+        """
+        return {
+            "bg": self.theme["field"],
+            "fg": self.theme["text"],
+            "insertbackground": self.theme["text"],
+            "relief": tk.FLAT,
+            "highlightthickness": 1,
+            "highlightbackground": self.theme["field_border"],
+            "highlightcolor": self.theme["accent"],
+            "bd": 0,
+        }
 
-        # Saturation Slider
-        tk.Label(self.colorize_frame, text="Saturation:", fg="white", bg="#2e2e2e").grid(row=1, column=0, sticky="w")
-        self.saturation_slider = tk.Scale(self.colorize_frame, from_=0.0, to=2.0, resolution=0.1, orient=tk.HORIZONTAL, bg="#2e2e2e", fg="white", troughcolor="#444", command=self.update_colorize)
-        self.saturation_slider.set(1.0)
-        self.saturation_slider.grid(row=1, column=1, sticky="ew", padx=5)
+    def _create_compact_slider(self, parent, label_text, from_, to, command, resolution=1, initial=0, formatter=None):
+        """
+        Create a compact slider row with a live numeric readout.
+        """
+        row = tk.Frame(parent, bg=self.theme["panel"])
+        row.pack(fill=tk.X, pady=(0, 6))
 
-        # Contrast Slider
-        tk.Label(self.colorize_frame, text="Contrast:", fg="white", bg="#2e2e2e").grid(row=2, column=0, sticky="w")
-        self.contrast_slider = tk.Scale(self.colorize_frame, from_=0.5, to=2.0, resolution=0.1, orient=tk.HORIZONTAL, bg="#2e2e2e", fg="white", troughcolor="#444", command=self.update_colorize)
-        self.contrast_slider.set(1.0)
-        self.contrast_slider.grid(row=2, column=1, sticky="ew", padx=5)
+        header = tk.Frame(row, bg=self.theme["panel"])
+        header.pack(fill=tk.X)
+        tk.Label(header, text=label_text, fg=self.theme["text"], bg=self.theme["panel"], anchor="w").pack(side=tk.LEFT)
 
-        # Invert Button
-        self.invert_button = tk.Checkbutton(
-            self.colorize_frame, 
-            text="Invert Colors", 
-            command=self.toggle_invert,
-            bg="#2e2e2e", fg="white", selectcolor="#444"
+        value_var = tk.StringVar()
+        tk.Label(header, textvariable=value_var, fg=self.theme["muted"], bg=self.theme["panel"], anchor="e").pack(side=tk.RIGHT)
+
+        scale_var = tk.DoubleVar(value=initial)
+        format_value = formatter or (lambda value: str(int(round(float(value)))))
+        value_var.set(format_value(initial))
+
+        def sync_label(*_args):
+            value_var.set(format_value(scale_var.get()))
+
+        scale_var.trace_add("write", sync_label)
+        self._slider_value_bindings.append((scale_var, value_var))
+
+        scale = tk.Scale(
+            row,
+            from_=from_,
+            to=to,
+            resolution=resolution,
+            orient=tk.HORIZONTAL,
+            variable=scale_var,
+            showvalue=False,
+            bg=self.theme["panel"],
+            fg=self.theme["text"],
+            troughcolor=self.theme["button_alt"],
+            activebackground=self.theme["accent"],
+            highlightthickness=0,
+            bd=0,
+            sliderlength=14,
+            width=10,
+            command=command,
         )
-        self.invert_button.grid(row=3, column=0, columnspan=2, pady=5)
-        self.invert_state = tk.BooleanVar(value=False)
-        self.invert_button.config(variable=self.invert_state)
+        scale.pack(fill=tk.X, pady=(3, 0))
+        scale.set(initial)
+        return scale
 
-        self.colorize_frame.columnconfigure(1, weight=1)
+    def _create_crop_control(self, parent, row, column, edge, label):
+        """
+        Create a compact crop control with entry and slider.
+        """
+        target_var = {
+            "left": self.crop_left_var,
+            "right": self.crop_right_var,
+            "top": self.crop_top_var,
+            "bottom": self.crop_bottom_var,
+        }[edge]
 
-        # --- Randomize Section ---
-        self.randomize_frame = tk.LabelFrame(
-            self.main_controls_container, 
-            text="Randomize", 
-            padx=10, pady=10,
-            fg="white", bg="#2e2e2e",
-            highlightbackground="white", highlightthickness=1
-        )
-        self.randomize_frame.grid(row=0, column=2, sticky="nsew", padx=5)
+        container = tk.Frame(parent, bg=self.theme["panel"])
+        container.grid(row=row, column=column, sticky="nsew", padx=(0, 6) if column == 0 else (6, 0), pady=(0, 8))
+        parent.grid_rowconfigure(row, weight=1)
 
-        # Randomize Button
-        self.randomize_button = tk.Button(
-            self.randomize_frame, 
-            text="Randomize Effects", 
-            command=self.randomize_effects,
-            **self._button_style("#444")
-        )
-        self.randomize_button.pack(expand=True, fill=tk.BOTH, padx=5, pady=5)
+        header = tk.Frame(container, bg=self.theme["panel"])
+        header.pack(fill=tk.X)
+        tk.Label(header, text=label, fg=self.theme["text"], bg=self.theme["panel"], anchor="w").pack(side=tk.LEFT)
+        entry = tk.Entry(header, textvariable=target_var, width=7, justify=tk.RIGHT, **self._entry_style())
+        entry.pack(side=tk.RIGHT)
+        entry.bind("<Return>", lambda _event: self.commit_crop_entry(edge))
+        entry.bind("<FocusOut>", lambda _event: self.commit_crop_entry(edge))
 
-        # Random Pixel Randomization Slider
-        tk.Label(self.randomize_frame, text="Random Pixels:", fg="white", bg="#2e2e2e").pack(anchor="w")
-        self.random_pixel_slider = tk.Scale(
-            self.randomize_frame, 
-            from_=0.0, to=1.0, 
-            resolution=0.01, 
-            orient=tk.HORIZONTAL, 
-            bg="#2e2e2e", fg="white", troughcolor="#444", 
-            command=self.update_random_pixels
-        )
-        self.random_pixel_slider.set(0.0)
-        self.random_pixel_slider.pack(fill=tk.X, padx=5, pady=5)
-
-        # --- Save Section ---
-        self.save_frame = tk.Frame(root, bg="#2e2e2e")
-        self.save_frame.pack(pady=10, padx=10, fill=tk.X)
-
-        # Folder Selector
-        self.folder_path = tk.StringVar()
-        self.folder_entry = tk.Entry(self.save_frame, textvariable=self.folder_path, bg="#444", fg="white")
-        self.folder_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-
-        self.browse_button = tk.Button(
-            self.save_frame, text="Browse", command=self.select_folder, **self._button_style("#444")
-        )
-        self.browse_button.pack(side=tk.LEFT, padx=5)
-
-        # Save Button
-        self.save_button = tk.Button(
-            self.save_frame, text="Save Image", command=self.save_image, **self._button_style("#444")
-        )
-        self.save_button.pack(side=tk.LEFT, padx=5)
-        
-        # Randomize Settings Button
-        self.randomize_settings_button = tk.Button(
-            self.save_frame, text="Settings", command=self.open_randomize_settings, **self._button_style("#666")
-        )
-        self.randomize_settings_button.pack(side=tk.LEFT, padx=5)
-
-        # --- Confuser Section ---
-        self.confuser_frame = tk.LabelFrame(
-            self.main_controls_container, 
-            text="Confuser", 
-            padx=10, pady=10,
-            fg="white", bg="#2e2e2e",
-            highlightbackground="white", highlightthickness=1
-        )
-        self.confuser_frame.grid(row=0, column=3, sticky="nsew", padx=5)
-
-        # Blur Slider
-        tk.Label(self.confuser_frame, text="Blur:", fg="white", bg="#2e2e2e").grid(row=0, column=0, sticky="w")
-        self.blur_slider = tk.Scale(
-            self.confuser_frame, 
-            from_=0, to=10, 
-            resolution=1, 
-            orient=tk.HORIZONTAL, 
-            bg="#2e2e2e", fg="white", troughcolor="#444", 
-            command=self.update_confuser
-        )
-        self.blur_slider.set(0)
-        self.blur_slider.grid(row=0, column=1, sticky="ew", padx=5)
-
-        # Color Reducer Slider
-        tk.Label(self.confuser_frame, text="Color Reducer:", fg="white", bg="#2e2e2e").grid(row=1, column=0, sticky="w")
-        self.color_reducer_slider = tk.Scale(
-            self.confuser_frame, 
-            from_=2, to=256, 
-            resolution=1, 
-            orient=tk.HORIZONTAL, 
-            bg="#2e2e2e", fg="white", troughcolor="#444", 
-            command=self.update_confuser
-        )
-        self.color_reducer_slider.set(256)
-        self.color_reducer_slider.grid(row=1, column=1, sticky="ew", padx=5)
-
-        # Legacy Color Collapse Slider (previous buggy behavior kept as an option)
-        tk.Label(self.confuser_frame, text="Color Collapse:", fg="white", bg="#2e2e2e").grid(row=2, column=0, sticky="w")
-        self.legacy_color_slider = tk.Scale(
-            self.confuser_frame,
-            from_=2, to=256,
+        slider = tk.Scale(
+            container,
+            from_=0,
+            to=0,
             resolution=1,
             orient=tk.HORIZONTAL,
-            bg="#2e2e2e", fg="white", troughcolor="#444",
-            command=self.update_confuser
+            bg=self.theme["panel"],
+            fg=self.theme["text"],
+            troughcolor=self.theme["button_alt"],
+            activebackground=self.theme["accent"],
+            highlightthickness=0,
+            bd=0,
+            sliderlength=14,
+            width=10,
+            showvalue=False,
+            command=lambda _value: self.update_crop(edge)
         )
-        self.legacy_color_slider.set(256)
-        self.legacy_color_slider.grid(row=2, column=1, sticky="ew", padx=5)
+        slider.pack(fill=tk.X, pady=(4, 0))
+        slider.set(0)
+        return slider, entry
 
-        self.confuser_frame.columnconfigure(1, weight=1)
-
-        # --- Blend Section ---
-        self.blend_frame = tk.LabelFrame(
-            self.main_controls_container,
-            text="Blend",
-            padx=10, pady=10,
-            fg="white", bg="#2e2e2e",
-            highlightbackground="white", highlightthickness=1
+    def _render_empty_preview(self):
+        """
+        Draw an empty-state placeholder in the preview canvas.
+        """
+        self.canvas.delete("all")
+        self.canvas.update_idletasks()
+        canvas_width = max(1, self.canvas.winfo_width())
+        canvas_height = max(1, self.canvas.winfo_height())
+        self.canvas.create_rectangle(0, 0, canvas_width, canvas_height, fill=self.theme["canvas"], outline="")
+        self.canvas.create_text(
+            canvas_width / 2,
+            canvas_height / 2 - 12,
+            text="No image loaded",
+            fill=self.theme["text"],
+            font=("Helvetica", 16, "bold")
         )
-        self.blend_frame.grid(row=0, column=4, sticky="nsew", padx=5)
+        self.canvas.create_text(
+            canvas_width / 2,
+            canvas_height / 2 + 16,
+            text="Upload a file to start editing.",
+            fill=self.theme["muted"],
+            font=("Helvetica", 11)
+        )
 
-        # Upload Blend Image Button
-        self.upload_blend_button = tk.Button(self.blend_frame, text="Upload Blend Image", command=self.upload_blend_image, **self._button_style("#444"))
-        self.upload_blend_button.grid(row=0, column=0, columnspan=2, sticky="ew", padx=5, pady=(0,5))
+    def _update_preview_metadata(self, rendered_size=None):
+        """
+        Refresh the preview title and status text.
+        """
+        if self.image_object is None or self.current_pil_image is None:
+            self.preview_title_var.set("No image loaded")
+            self.preview_hint_var.set("Upload an image to start creating a glitchy preview.")
+            return
 
-        # Label to show selected blend filename
-        self.blend_filename_var = tk.StringVar(value="No file")
-        tk.Label(self.blend_frame, textvariable=self.blend_filename_var, fg="white", bg="#2e2e2e").grid(row=1, column=0, columnspan=2, sticky="w")
+        source_width, source_height = self.current_pil_image.size
+        self.preview_title_var.set(self.image_object.name)
 
-        # Blend Factor Slider
-        tk.Label(self.blend_frame, text="Blend Factor:", fg="white", bg="#2e2e2e").grid(row=2, column=0, sticky="w")
-        self.blend_slider = tk.Scale(self.blend_frame, from_=0.0, to=1.0, resolution=0.01, orient=tk.HORIZONTAL, bg="#2e2e2e", fg="white", troughcolor="#444", command=self.update_blend)
-        self.blend_slider.set(0.0)
-        self.blend_slider.grid(row=2, column=1, sticky="ew", padx=5)
+        preview_text = f"Source {source_width} x {source_height}"
+        crop_text = self.crop_size_var.get()
+        if crop_text and crop_text != "Final Size: -":
+            preview_text += f" • {crop_text}"
+        if rendered_size is not None and rendered_size != (source_width, source_height):
+            preview_text += f" • Preview {rendered_size[0]} x {rendered_size[1]}"
 
-        self.blend_frame.columnconfigure(1, weight=1)
-        self._sync_crop_controls_to_image(reset_values=True)
+        self.preview_hint_var.set(preview_text)
 
     def _button_style(self, background):
         """
-        Use readable button text on macOS while preserving the dark look elsewhere.
+        Shared button styling for the dark UI.
         """
-        foreground = "#111111" if self.is_macos else "white"
+        if self.is_macos:
+            background = "#d7dbe4" if background != self.theme["accent_soft"] else "#c7d5ff"
+            foreground = "#11131a"
+            active_background = "#c8cfdb" if background != "#c7d5ff" else "#b8c9ff"
+            disabled_foreground = "#5f6776"
+        else:
+            foreground = self.theme["text"]
+            active_background = background
+            disabled_foreground = foreground
+
         return {
             "bg": background,
             "fg": foreground,
-            "activebackground": background,
+            "activebackground": active_background,
             "activeforeground": foreground,
-            "disabledforeground": foreground,
+            "disabledforeground": disabled_foreground,
             "highlightbackground": background,
+            "bd": 0,
+            "relief": tk.FLAT,
+            "padx": 12,
+            "pady": 8,
         }
 
     def _create_randomize_settings(self):
@@ -621,23 +815,24 @@ class App:
             return
 
         first_width, first_height = self.animation_frames[0].size
-        self.animation_status_var.set(f"{frame_count} frame(s) • base {first_width} x {first_height}")
+        suffix = " • showing latest 6" if frame_count > 6 else ""
+        self.animation_status_var.set(f"{frame_count} frame(s) • base {first_width} x {first_height}{suffix}")
 
     def _update_animation_scroll_region(self, _event=None):
         """
-        Keep the animation preview strip scroll region in sync with its content.
+        Legacy no-op kept for compatibility with the updated compact layout.
         """
-        self.animation_preview_canvas.configure(scrollregion=self.animation_preview_canvas.bbox("all"))
+        return
 
     def _resize_animation_preview_window(self, event):
         """
-        Keep the preview strip sized to the available canvas height.
+        Legacy no-op kept for compatibility with the updated compact layout.
         """
-        self.animation_preview_canvas.itemconfigure(self.animation_preview_window, height=event.height)
+        return
 
     def _refresh_animation_preview_strip(self):
         """
-        Rebuild the thumbnail strip for captured animation frames.
+        Rebuild the compact thumbnail grid for captured animation frames.
         """
         for child in self.animation_preview_inner.winfo_children():
             child.destroy()
@@ -648,34 +843,46 @@ class App:
             empty_label = tk.Label(
                 self.animation_preview_inner,
                 text="Capture frames from the current preview to build an animation.",
-                fg="#9e9e9e", bg="#202020"
+                fg=self.theme["muted"],
+                bg=self.theme["panel_soft"],
+                justify=tk.LEFT,
+                wraplength=300
             )
-            empty_label.pack(anchor="w", padx=10, pady=18)
-            self._update_animation_scroll_region()
+            empty_label.pack(anchor="w", padx=12, pady=18)
             self._update_animation_status()
             return
 
-        for index, frame in enumerate(self.animation_frames, start=1):
-            tile = tk.Frame(self.animation_preview_inner, bg="#202020", highlightbackground="#555", highlightthickness=1)
-            tile.pack(side=tk.LEFT, padx=(0 if index == 1 else 8, 0), pady=4)
+        for column in range(3):
+            self.animation_preview_inner.grid_columnconfigure(column, weight=1)
+
+        visible_frames = list(enumerate(self.animation_frames, start=1))[-6:]
+
+        for display_index, (frame_index, frame) in enumerate(visible_frames):
+            tile = tk.Frame(
+                self.animation_preview_inner,
+                bg=self.theme["panel_alt"],
+                highlightbackground=self.theme["border"],
+                highlightthickness=1,
+                bd=0
+            )
+            tile.grid(row=display_index // 3, column=display_index % 3, sticky="nsew", padx=4, pady=4)
 
             thumb = frame.copy()
-            thumb.thumbnail((110, 110), Image.LANCZOS)
+            thumb.thumbnail((92, 92), Image.LANCZOS)
             photo = ImageTk.PhotoImage(thumb)
             self.animation_preview_images.append(photo)
 
-            preview_label = tk.Label(tile, image=photo, bg="#202020")
+            preview_label = tk.Label(tile, image=photo, bg=self.theme["panel_alt"])
             preview_label.pack(padx=8, pady=(8, 4))
 
             caption = tk.Label(
                 tile,
-                text=f"Frame {index}\n{frame.size[0]} x {frame.size[1]}",
-                fg="white", bg="#202020",
+                text=f"Frame {frame_index}\n{frame.size[0]} x {frame.size[1]}",
+                fg=self.theme["text"], bg=self.theme["panel_alt"],
                 justify=tk.CENTER
             )
             caption.pack(padx=8, pady=(0, 8))
 
-        self._update_animation_scroll_region()
         self._update_animation_status()
 
     def _get_animation_export_formats(self):
@@ -1013,6 +1220,7 @@ class App:
         if self.current_pil_image is None:
             self.crop_size_var.set("Final Size: -")
             self._set_crop_preset_value("Free")
+            self._update_preview_metadata()
             return
 
         left, top, right, bottom = self._get_active_crop_box(self.current_pil_image.size)
@@ -1028,6 +1236,7 @@ class App:
                 break
 
         self._set_crop_preset_value(matched_preset)
+        self._update_preview_metadata()
 
     def _sync_crop_controls_to_image(self, reset_values=True):
         """
@@ -1567,6 +1776,12 @@ class App:
             messagebox.showerror("Error", f"Failed to load image: {e}")
 
     def display_image(self, img):
+        if img is None:
+            self.tk_img = None
+            self._render_empty_preview()
+            self._update_preview_metadata()
+            return
+
         self.canvas.update_idletasks() # Ensure canvas dimensions are updated
         canvas_width = self.canvas.winfo_width()
         canvas_height = self.canvas.winfo_height()
@@ -1580,6 +1795,7 @@ class App:
         self.tk_img = ImageTk.PhotoImage(resized_img)
         self.canvas.delete("all")
         self.canvas.create_image(canvas_width/2, canvas_height/2, anchor=tk.CENTER, image=self.tk_img)
+        self._update_preview_metadata(rendered_size=img.size)
 
     def randomize_effects(self):
         """
