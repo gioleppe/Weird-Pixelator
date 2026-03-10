@@ -1,6 +1,8 @@
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
+import colorsys
 import os
+import struct
 from PIL import Image, ImageTk, ImageFilter, ImageOps
 import numpy as np
 from image_object import ImageObject
@@ -34,6 +36,10 @@ class App:
         self.animation_frames = []
         self.animation_preview_images = []
         self.animation_status_var = tk.StringVar(value="No frames added yet.")
+        self.palette_entries = []
+        self.palette_status_var = tk.StringVar(value="Load an image and extract a palette from the preview.")
+        self.palette_format_var = tk.StringVar(value="HEX File")
+        self.palette_sort_var = tk.StringVar(value="Frequency")
         self.invert_state = tk.BooleanVar(value=False)
         self.folder_path = tk.StringVar()
         self.blend_filename_var = tk.StringVar(value="No file")
@@ -221,16 +227,19 @@ class App:
         self.finish_tab = tk.Frame(self.controls_notebook, bg=self.theme["bg"])
         self.crop_tab = tk.Frame(self.controls_notebook, bg=self.theme["bg"])
         self.animate_tab = tk.Frame(self.controls_notebook, bg=self.theme["bg"])
+        self.palette_tab = tk.Frame(self.controls_notebook, bg=self.theme["bg"])
 
         self.controls_notebook.add(self.edit_tab, text="Adjust")
         self.controls_notebook.add(self.finish_tab, text="Finish")
         self.controls_notebook.add(self.crop_tab, text="Crop")
         self.controls_notebook.add(self.animate_tab, text="Animate")
+        self.controls_notebook.add(self.palette_tab, text="Palette")
 
         self._build_adjust_tab()
         self._build_finish_tab()
         self._build_crop_tab()
         self._build_animation_tab()
+        self._build_palette_tab()
 
     def _build_adjust_tab(self):
         """
@@ -547,6 +556,117 @@ class App:
             anchor="w"
         ).pack(fill=tk.X, pady=(8, 0))
 
+    def _build_palette_tab(self):
+        """
+        Build the palette extraction tab.
+        """
+        self.palette_tab.grid_columnconfigure(0, weight=1)
+        self.palette_frame, palette_body = self._create_card(self.palette_tab, "Palette", self.palette_status_var)
+        self.palette_frame.grid(row=0, column=0, sticky="nsew")
+
+        self.palette_count_slider = self._create_compact_slider(
+            palette_body,
+            "Color Count",
+            2,
+            24,
+            self.update_palette_count,
+            initial=8,
+        )
+
+        format_row = tk.Frame(palette_body, bg=self.theme["panel"])
+        format_row.pack(fill=tk.X, pady=(0, 6))
+        tk.Label(format_row, text="Format", fg=self.theme["text"], bg=self.theme["panel"], anchor="w").pack(anchor="w")
+        self.palette_format_menu = tk.OptionMenu(
+            format_row,
+            self.palette_format_var,
+            "PNG Image (1x)",
+            "PNG Image (8x)",
+            "PNG Image (32x)",
+            "PAL File (JASC)",
+            "Photoshop ASE",
+            "Paint.net TXT",
+            "GIMP GPL",
+            "HEX File",
+        )
+        self._style_option_menu(self.palette_format_menu)
+        self.palette_format_menu.pack(fill=tk.X, pady=(4, 0))
+
+        sort_row = tk.Frame(palette_body, bg=self.theme["panel"])
+        sort_row.pack(fill=tk.X, pady=(0, 8))
+        tk.Label(sort_row, text="Sort Colors", fg=self.theme["text"], bg=self.theme["panel"], anchor="w").pack(anchor="w")
+        self.palette_sort_menu = tk.OptionMenu(
+            sort_row,
+            self.palette_sort_var,
+            "Frequency",
+            "Hue",
+            "Brightness",
+            command=self.update_palette_display,
+        )
+        self._style_option_menu(self.palette_sort_menu)
+        self.palette_sort_menu.pack(fill=tk.X, pady=(4, 0))
+
+        self.extract_palette_button = tk.Button(
+            palette_body,
+            text="Extract Palette",
+            command=self.extract_palette_from_preview,
+            **self._button_style(self.theme["accent_soft"])
+        )
+        self.extract_palette_button.pack(fill=tk.X, pady=(0, 6))
+
+        self.save_palette_button = tk.Button(
+            palette_body,
+            text="Save Palette As",
+            command=self.save_palette_as,
+            **self._button_style(self.theme["button_alt"])
+        )
+        self.save_palette_button.pack(fill=tk.X, pady=(0, 10))
+
+        preview_label = tk.Label(
+            palette_body,
+            text="Preview (click a swatch to copy HEX)",
+            fg=self.theme["text"],
+            bg=self.theme["panel"],
+            anchor="w"
+        )
+        preview_label.pack(fill=tk.X)
+
+        self.palette_preview_inner = tk.Frame(
+            palette_body,
+            bg=self.theme["panel_soft"],
+            highlightbackground=self.theme["panel_soft"],
+            highlightthickness=0,
+            bd=0
+        )
+        self.palette_preview_inner.pack(fill=tk.X, pady=(4, 10))
+
+        values_label = tk.Label(
+            palette_body,
+            text="Palette Values",
+            fg=self.theme["text"],
+            bg=self.theme["panel"],
+            anchor="w"
+        )
+        values_label.pack(fill=tk.X)
+
+        self.palette_values_text = tk.Text(
+            palette_body,
+            height=12,
+            wrap=tk.WORD,
+            bg=self.theme["field"],
+            fg=self.theme["text"],
+            insertbackground=self.theme["text"],
+            relief=tk.FLAT,
+            highlightthickness=1,
+            highlightbackground=self.theme["field_border"],
+            highlightcolor=self.theme["accent"],
+            bd=0,
+            padx=10,
+            pady=10,
+        )
+        self.palette_values_text.pack(fill=tk.BOTH, expand=True)
+        self.palette_values_text.configure(state=tk.DISABLED)
+        self._reset_palette_output()
+
     def _create_card(self, parent, title, subtitle=None, stretch=False):
         """
         Create a modern dark card container and return the card plus its body frame.
@@ -585,6 +705,429 @@ class App:
         body = tk.Frame(card, bg=self.theme["panel"])
         body.pack(fill=tk.BOTH, expand=True, padx=12, pady=(0, 12))
         return card, body
+
+    def _set_palette_text(self, text):
+        """
+        Update the palette text output.
+        """
+        if not hasattr(self, 'palette_values_text'):
+            return
+
+        self.palette_values_text.configure(state=tk.NORMAL)
+        self.palette_values_text.delete("1.0", tk.END)
+        self.palette_values_text.insert("1.0", text)
+        self.palette_values_text.configure(state=tk.DISABLED)
+
+    def _reset_palette_output(self, message=None):
+        """
+        Clear palette output widgets and status.
+        """
+        self.palette_entries = []
+        if message is None:
+            message = "Load an image and extract a palette from the preview."
+
+        self.palette_status_var.set(message)
+        if hasattr(self, 'palette_preview_inner'):
+            for child in self.palette_preview_inner.winfo_children():
+                child.destroy()
+            tk.Label(
+                self.palette_preview_inner,
+                text="Extract a palette to see color swatches here.",
+                fg=self.theme["muted"],
+                bg=self.theme["panel_soft"],
+                justify=tk.LEFT,
+                wraplength=300,
+            ).pack(anchor="w", padx=0, pady=8)
+
+        self._set_palette_text("No palette extracted yet.")
+
+    def _get_color_luminance(self, rgb):
+        """
+        Return perceived luminance for an RGB tuple.
+        """
+        red, green, blue = rgb
+        return (0.2126 * red) + (0.7152 * green) + (0.0722 * blue)
+
+    def _palette_text_color(self, rgb):
+        """
+        Choose dark or light text for a swatch.
+        """
+        return "#11131a" if self._get_color_luminance(rgb) >= 150 else self.theme["text"]
+
+    def _rgb_to_hex(self, rgb):
+        """
+        Convert RGB to hex.
+        """
+        return f"#{rgb[0]:02X}{rgb[1]:02X}{rgb[2]:02X}"
+
+    def _rgb_to_hsl(self, rgb):
+        """
+        Convert RGB to HSL components.
+        """
+        red, green, blue = [channel / 255.0 for channel in rgb]
+        hue, lightness, saturation = colorsys.rgb_to_hls(red, green, blue)
+        return (
+            int(round(hue * 360.0)) % 360,
+            int(round(saturation * 100.0)),
+            int(round(lightness * 100.0)),
+        )
+
+    def _rgb_to_hsv(self, rgb):
+        """
+        Convert RGB to HSV components.
+        """
+        red, green, blue = [channel / 255.0 for channel in rgb]
+        hue, saturation, value = colorsys.rgb_to_hsv(red, green, blue)
+        return (
+            int(round(hue * 360.0)) % 360,
+            int(round(saturation * 100.0)),
+            int(round(value * 100.0)),
+        )
+
+    def _rgb_to_cmyk(self, rgb):
+        """
+        Convert RGB to CMYK components.
+        """
+        red, green, blue = [channel / 255.0 for channel in rgb]
+        key = 1.0 - max(red, green, blue)
+        if key >= 1.0:
+            return (0, 0, 0, 100)
+
+        cyan = (1.0 - red - key) / max(0.0001, 1.0 - key)
+        magenta = (1.0 - green - key) / max(0.0001, 1.0 - key)
+        yellow = (1.0 - blue - key) / max(0.0001, 1.0 - key)
+        return (
+            int(round(cyan * 100.0)),
+            int(round(magenta * 100.0)),
+            int(round(yellow * 100.0)),
+            int(round(key * 100.0)),
+        )
+
+    def _get_palette_export_formats(self):
+        """
+        Return supported palette export formats.
+        """
+        return {
+            "PNG Image (1x)": {
+                "extension": ".png",
+                "filetypes": [("PNG Image", "*.png")],
+            },
+            "PNG Image (8x)": {
+                "extension": ".png",
+                "filetypes": [("PNG Image", "*.png")],
+            },
+            "PNG Image (32x)": {
+                "extension": ".png",
+                "filetypes": [("PNG Image", "*.png")],
+            },
+            "PAL File (JASC)": {
+                "extension": ".pal",
+                "filetypes": [("JASC Palette", "*.pal")],
+            },
+            "Photoshop ASE": {
+                "extension": ".ase",
+                "filetypes": [("Adobe Swatch Exchange", "*.ase")],
+            },
+            "Paint.net TXT": {
+                "extension": ".txt",
+                "filetypes": [("Paint.net Palette", "*.txt")],
+            },
+            "GIMP GPL": {
+                "extension": ".gpl",
+                "filetypes": [("GIMP Palette", "*.gpl")],
+            },
+            "HEX File": {
+                "extension": ".txt",
+                "filetypes": [("HEX Palette", "*.txt")],
+            },
+        }
+
+    def _format_palette_color(self, rgb):
+        """
+        Format a palette color for the on-screen value list.
+        """
+        hex_value = self._rgb_to_hex(rgb)
+        rgb_value = f"rgb({rgb[0]}, {rgb[1]}, {rgb[2]})"
+        hsl = self._rgb_to_hsl(rgb)
+        hsv = self._rgb_to_hsv(rgb)
+        cmyk = self._rgb_to_cmyk(rgb)
+
+        hsl_value = f"hsl({hsl[0]}°, {hsl[1]}%, {hsl[2]}%)"
+        hsv_value = f"hsv({hsv[0]}°, {hsv[1]}%, {hsv[2]}%)"
+        cmyk_value = f"cmyk({cmyk[0]}%, {cmyk[1]}%, {cmyk[2]}%, {cmyk[3]}%)"
+        return f"{hex_value} | {rgb_value} | {hsl_value} | {hsv_value} | {cmyk_value}"
+
+    def _copy_palette_hex(self, rgb):
+        """
+        Copy a swatch HEX value to the clipboard.
+        """
+        hex_value = self._rgb_to_hex(rgb)
+        self.root.clipboard_clear()
+        self.root.clipboard_append(hex_value)
+        self.root.update_idletasks()
+        self.palette_status_var.set(f"Copied {hex_value} to the clipboard.")
+
+    def _palette_file_stem(self):
+        """
+        Return a base filename for palette exports.
+        """
+        if self.image_object is None or not getattr(self.image_object, 'name', None):
+            return "Weird_Pixelator_Palette"
+
+        name_root, _ext = os.path.splitext(self.image_object.name)
+        cleaned = name_root.strip() or "Weird_Pixelator_Palette"
+        return f"{cleaned}_palette"
+
+    def _write_palette_png(self, file_path, entries, scale):
+        """
+        Save the palette as a PNG swatch strip.
+        """
+        colors = [entry["rgb"] for entry in entries]
+        swatch_size = max(1, int(scale))
+        palette_image = Image.new("RGB", (len(colors) * swatch_size, swatch_size))
+
+        for index, rgb in enumerate(colors):
+            swatch = Image.new("RGB", (swatch_size, swatch_size), rgb)
+            palette_image.paste(swatch, (index * swatch_size, 0))
+
+        palette_image.save(file_path)
+
+    def _write_palette_jasc(self, file_path, entries):
+        """
+        Save the palette as a JASC PAL file.
+        """
+        lines = ["JASC-PAL", "0100", str(len(entries))]
+        for entry in entries:
+            red, green, blue = entry["rgb"]
+            lines.append(f"{red} {green} {blue}")
+
+        with open(file_path, "w", encoding="utf-8") as palette_file:
+            palette_file.write("\n".join(lines) + "\n")
+
+    def _write_palette_hex_file(self, file_path, entries):
+        """
+        Save the palette as a plain HEX list.
+        """
+        lines = [self._rgb_to_hex(entry["rgb"]) for entry in entries]
+        with open(file_path, "w", encoding="utf-8") as palette_file:
+            palette_file.write("\n".join(lines) + "\n")
+
+    def _write_palette_gpl(self, file_path, entries):
+        """
+        Save the palette as a GIMP GPL file.
+        """
+        lines = [
+            "GIMP Palette",
+            f"Name: {self._palette_file_stem()}",
+            "Columns: 4",
+            "#",
+        ]
+        for index, entry in enumerate(entries, start=1):
+            red, green, blue = entry["rgb"]
+            lines.append(f"{red:3d} {green:3d} {blue:3d} Color {index}")
+
+        with open(file_path, "w", encoding="utf-8") as palette_file:
+            palette_file.write("\n".join(lines) + "\n")
+
+    def _write_palette_paintnet(self, file_path, entries):
+        """
+        Save the palette as a Paint.net text palette.
+        """
+        lines = [
+            "; paint.net Palette File",
+            "; Generated by Weird Pixelator",
+            "; Colors are written as AARRGGBB hex values",
+        ]
+        for entry in entries:
+            red, green, blue = entry["rgb"]
+            lines.append(f"FF{red:02X}{green:02X}{blue:02X}")
+
+        with open(file_path, "w", encoding="utf-8") as palette_file:
+            palette_file.write("\n".join(lines) + "\n")
+
+    def _write_palette_ase(self, file_path, entries):
+        """
+        Save the palette as an Adobe Swatch Exchange file.
+        """
+        blocks = []
+        for index, entry in enumerate(entries, start=1):
+            red, green, blue = entry["rgb"]
+            name = f"Color {index}"
+            name_data = name.encode("utf-16be") + b"\x00\x00"
+            name_length = len(name) + 1
+            block_data = b"".join([
+                struct.pack(">H", name_length),
+                name_data,
+                b"RGB ",
+                struct.pack(">fff", red / 255.0, green / 255.0, blue / 255.0),
+                struct.pack(">H", 0),
+            ])
+            blocks.append(struct.pack(">HI", 0x0001, len(block_data)) + block_data)
+
+        header = struct.pack(">4sHHI", b"ASEF", 1, 0, len(blocks))
+        with open(file_path, "wb") as palette_file:
+            palette_file.write(header)
+            for block in blocks:
+                palette_file.write(block)
+
+    def _export_palette_file(self, entries):
+        """
+        Save the current palette in the selected export format.
+        """
+        format_name = self.palette_format_var.get()
+        format_info = self._get_palette_export_formats().get(format_name)
+        if format_info is None:
+            raise ValueError("Unsupported palette format.")
+
+        initial_dir = self.folder_path.get().strip() or os.getcwd()
+        file_path = filedialog.asksaveasfilename(
+            title="Save Palette",
+            defaultextension=format_info["extension"],
+            filetypes=format_info["filetypes"],
+            initialdir=initial_dir,
+            initialfile=f"{self._palette_file_stem()}{format_info['extension']}",
+        )
+        if not file_path:
+            return None
+
+        if format_name == "PNG Image (1x)":
+            self._write_palette_png(file_path, entries, 1)
+        elif format_name == "PNG Image (8x)":
+            self._write_palette_png(file_path, entries, 8)
+        elif format_name == "PNG Image (32x)":
+            self._write_palette_png(file_path, entries, 32)
+        elif format_name == "PAL File (JASC)":
+            self._write_palette_jasc(file_path, entries)
+        elif format_name == "Photoshop ASE":
+            self._write_palette_ase(file_path, entries)
+        elif format_name == "Paint.net TXT":
+            self._write_palette_paintnet(file_path, entries)
+        elif format_name == "GIMP GPL":
+            self._write_palette_gpl(file_path, entries)
+        elif format_name == "HEX File":
+            self._write_palette_hex_file(file_path, entries)
+        else:
+            raise ValueError("Unsupported palette format.")
+
+        return file_path
+
+    def _sorted_palette_entries(self):
+        """
+        Return palette entries in the currently selected sort order.
+        """
+        entries = list(self.palette_entries)
+        sort_mode = self.palette_sort_var.get()
+
+        if sort_mode == "Hue":
+            entries.sort(key=lambda entry: self._rgb_to_hsv(entry["rgb"]))
+            return entries
+
+        if sort_mode == "Brightness":
+            entries.sort(key=lambda entry: self._get_color_luminance(entry["rgb"]))
+            return entries
+
+        entries.sort(key=lambda entry: (-entry["count"], -self._get_color_luminance(entry["rgb"])))
+        return entries
+
+    def update_palette_count(self, _=None):
+        """
+        Re-extract the palette when a palette already exists and the count changes.
+        """
+        if self.palette_entries:
+            self._extract_palette_from_preview(save_to_file=False)
+
+    def update_palette_display(self, _=None):
+        """
+        Refresh the palette swatches and value list.
+        """
+        if not self.palette_entries:
+            self._reset_palette_output(self.palette_status_var.get())
+            return
+
+        for child in self.palette_preview_inner.winfo_children():
+            child.destroy()
+
+        sorted_entries = self._sorted_palette_entries()
+        for column in range(8):
+            self.palette_preview_inner.grid_columnconfigure(column, weight=1)
+
+        for index, entry in enumerate(sorted_entries):
+            rgb = entry["rgb"]
+            hex_value = self._rgb_to_hex(rgb)
+            tile = tk.Frame(
+                self.palette_preview_inner,
+                bg=hex_value,
+                highlightbackground=hex_value,
+                highlightthickness=0,
+                bd=0,
+                cursor="hand2",
+                width=14,
+                height=14,
+            )
+            tile.grid(row=index // 8, column=index % 8, sticky="nsew", padx=0, pady=0)
+            tile.grid_propagate(False)
+
+            for widget in (tile,):
+                widget.bind("<Button-1>", lambda _event, color=rgb: self._copy_palette_hex(color))
+
+        lines = []
+        for index, entry in enumerate(sorted_entries, start=1):
+            color_text = self._format_palette_color(entry["rgb"])
+            ratio_text = f"{entry['ratio'] * 100:.1f}%"
+            lines.append(f"{index}. {color_text} • {ratio_text}")
+
+        self._set_palette_text("\n".join(lines))
+
+    def _extract_palette_from_preview(self, save_to_file=False):
+        """
+        Extract a palette from the current rendered preview image.
+        """
+        if self.image_object is None or self.current_pil_image is None:
+            messagebox.showerror("Error", "Load an image before extracting a palette.")
+            return
+
+        preview_image = self.render_current_image(for_preview=True)
+        if preview_image is None:
+            messagebox.showerror("Error", "Unable to render the current preview for palette extraction.")
+            return
+
+        color_count = max(2, min(24, int(float(self.palette_count_slider.get()))))
+        entries = image_effects.extract_palette(preview_image, color_count)
+        if not entries:
+            self._reset_palette_output("No colors could be extracted from the current preview.")
+            return
+
+        self.palette_entries = entries
+        self.palette_status_var.set(f"Extracted {len(entries)} colors from the current preview.")
+        self.update_palette_display()
+
+        if save_to_file:
+            file_path = self._export_palette_file(self._sorted_palette_entries())
+            if file_path:
+                self.palette_status_var.set(f"Saved palette to {os.path.basename(file_path)}")
+
+    def extract_palette_from_preview(self):
+        """
+        Extract a palette from the current preview.
+        """
+        self._extract_palette_from_preview(save_to_file=False)
+
+    def save_palette_as(self):
+        """
+        Save the current extracted palette using the selected export format.
+        """
+        if not self.palette_entries:
+            messagebox.showerror("Error", "Extract a palette before saving it.")
+            return
+
+        try:
+            file_path = self._export_palette_file(self._sorted_palette_entries())
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save palette: {e}")
+            return
+
+        if file_path:
+            self.palette_status_var.set(f"Saved palette to {os.path.basename(file_path)}")
 
     def _style_option_menu(self, menu):
         """
@@ -1151,6 +1694,7 @@ class App:
             self.export_compression_var.set("No Compression")
             self._sync_crop_controls_to_image(reset_values=True)
             self.clear_animation_frames()
+            self._reset_palette_output("Ready to extract a palette from the current preview.")
 
             self.pipeline_image = None
             self.full_resolution_image = None
