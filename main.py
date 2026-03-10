@@ -40,35 +40,149 @@ class App:
         self.palette_status_var = tk.StringVar(value="Load an image and extract a palette from the preview.")
         self.palette_format_var = tk.StringVar(value="HEX File")
         self.palette_sort_var = tk.StringVar(value="Frequency")
+        self.theme_name_var = tk.StringVar(value="Classic Gray")
         self.invert_state = tk.BooleanVar(value=False)
         self.folder_path = tk.StringVar()
         self.blend_filename_var = tk.StringVar(value="No file")
         self.preview_title_var = tk.StringVar(value="No image loaded")
         self.preview_hint_var = tk.StringVar(value="Upload an image to start creating a glitchy preview.")
         self._slider_value_bindings = []
-        self.theme = {
-            "bg": "#15181e",
-            "panel": "#1d2129",
-            "panel_alt": "#242935",
-            "panel_soft": "#202530",
-            "border": "#32394a",
-            "text": "#f4f6fb",
-            "muted": "#9ea8ba",
-            "canvas": "#0f1217",
-            "field": "#13171f",
-            "field_border": "#3b4356",
-            "accent": "#6e8cff",
-            "accent_soft": "#55637d",
-            "button": "#353e50",
-            "button_alt": "#2b3241",
-        }
+        self.themes = self._create_theme_presets()
+        self.theme = self.themes[self.theme_name_var.get()]
 
-        self.root.configure(bg=self.theme["bg"])
         self.root.geometry("1080x720")
         self.root.minsize(920, 660)
+        self._build_ui_shell()
+        self._sync_crop_controls_to_image(reset_values=True)
+        self._refresh_animation_preview_strip()
+        self._render_empty_preview()
+
+    def _create_theme_presets(self):
+        """
+        Return the available app themes.
+        """
+        return {
+            "Classic Gray": {
+                "bg": "#c0c0c0",
+                "panel": "#d4d0c8",
+                "panel_alt": "#ece9d8",
+                "panel_soft": "#f3f0e4",
+                "border": "#7f7f7f",
+                "text": "#111111",
+                "muted": "#4e4e4e",
+                "canvas": "#808080",
+                "field": "#ffffff",
+                "field_border": "#7f9db9",
+                "accent": "#0a246a",
+                "accent_soft": "#b6c7e5",
+                "button": "#d4d0c8",
+                "button_alt": "#e6e2d8",
+                "shadow_dark": "#808080",
+                "shadow_light": "#ffffff",
+            },
+            "XP Blue": {
+                "bg": "#dbe7f7",
+                "panel": "#ece9d8",
+                "panel_alt": "#ffffff",
+                "panel_soft": "#f7f4ea",
+                "border": "#7f9db9",
+                "text": "#0f1728",
+                "muted": "#4f6280",
+                "canvas": "#6f8db9",
+                "field": "#ffffff",
+                "field_border": "#7f9db9",
+                "accent": "#1f5fbf",
+                "accent_soft": "#c8daf5",
+                "button": "#d6e3f5",
+                "button_alt": "#eef4fd",
+                "shadow_dark": "#7f9db9",
+                "shadow_light": "#ffffff",
+            },
+            "Olive Retro": {
+                "bg": "#d6d6c2",
+                "panel": "#d9d3be",
+                "panel_alt": "#ece7d5",
+                "panel_soft": "#f5f1e5",
+                "border": "#8a8673",
+                "text": "#232117",
+                "muted": "#5f5a46",
+                "canvas": "#8d9278",
+                "field": "#fffdf6",
+                "field_border": "#9fa27f",
+                "accent": "#4f6b2b",
+                "accent_soft": "#cfd9b6",
+                "button": "#d6d0b8",
+                "button_alt": "#e8e2cb",
+                "shadow_dark": "#8a8673",
+                "shadow_light": "#fffdf6",
+            },
+            "Windows 98 Beige": {
+                "bg": "#c9c1b2",
+                "panel": "#d8d0c4",
+                "panel_alt": "#efe7da",
+                "panel_soft": "#f7f1e7",
+                "border": "#8b8173",
+                "text": "#1d1a16",
+                "muted": "#655c52",
+                "canvas": "#8f877c",
+                "field": "#fffaf2",
+                "field_border": "#9d9283",
+                "accent": "#7a0000",
+                "accent_soft": "#d8beb8",
+                "button": "#d8d0c4",
+                "button_alt": "#e8dfd1",
+                "shadow_dark": "#8b8173",
+                "shadow_light": "#fffaf2",
+            },
+            "Dark Retro": {
+                "bg": "#2e2a26",
+                "panel": "#3a342f",
+                "panel_alt": "#4a433d",
+                "panel_soft": "#544c45",
+                "border": "#161311",
+                "text": "#f2eadf",
+                "muted": "#c2b5a3",
+                "canvas": "#1b1714",
+                "field": "#241f1b",
+                "field_border": "#8a7a67",
+                "accent": "#c86b2a",
+                "accent_soft": "#7b6758",
+                "button": "#4a433d",
+                "button_alt": "#5a5148",
+                "shadow_dark": "#161311",
+                "shadow_light": "#7a6e62",
+            },
+            "Terminal Green": {
+                "bg": "#0b120b",
+                "panel": "#132013",
+                "panel_alt": "#1a2a1a",
+                "panel_soft": "#1f331f",
+                "border": "#2f5a2f",
+                "text": "#8cff8c",
+                "muted": "#5fb35f",
+                "canvas": "#050805",
+                "field": "#091009",
+                "field_border": "#2f5a2f",
+                "accent": "#00ff66",
+                "accent_soft": "#1f4f2c",
+                "button": "#183018",
+                "button_alt": "#204020",
+                "shadow_dark": "#041004",
+                "shadow_light": "#3b6f3b",
+            },
+        }
+
+    def _build_ui_shell(self):
+        """
+        Build or rebuild the main app shell for the current theme.
+        """
+        self.root.configure(bg=self.theme["bg"])
         self._configure_notebook_style()
 
-        self.app_shell = tk.Frame(root, bg=self.theme["bg"])
+        if hasattr(self, 'app_shell') and self.app_shell is not None:
+            self.app_shell.destroy()
+
+        self.app_shell = tk.Frame(self.root, bg=self.theme["bg"])
         self.app_shell.pack(fill=tk.BOTH, expand=True, padx=12, pady=12)
         self.app_shell.grid_columnconfigure(0, weight=3)
         self.app_shell.grid_columnconfigure(1, weight=2, minsize=360)
@@ -77,32 +191,180 @@ class App:
         self._build_header()
         self._build_preview_panel()
         self._build_control_sidebar()
-        self._sync_crop_controls_to_image(reset_values=True)
+
+    def _capture_ui_state(self):
+        """
+        Capture current widget state so the UI can be rebuilt for theme changes.
+        """
+        slider_names = [
+            'pixel_slider', 'jitter_slider', 'block_slider', 'sort_slider',
+            'hue_slider', 'saturation_slider', 'contrast_slider',
+            'random_pixel_slider', 'blur_slider', 'color_reducer_slider', 'legacy_color_slider',
+            'blend_slider', 'curvature_slider', 'distortion_slider', 'glow_slider',
+            'noise_slider', 'scanline_slider', 'rgb_shift_slider', 'vignette_slider',
+        ]
+        slider_values = {}
+        for name in slider_names:
+            if hasattr(self, name):
+                slider_values[name] = float(getattr(self, name).get())
+
+        selected_tab = 0
+        if hasattr(self, 'controls_notebook'):
+            try:
+                selected_tab = self.controls_notebook.index(self.controls_notebook.select())
+            except tk.TclError:
+                selected_tab = 0
+
+        palette_entries = [dict(entry) for entry in self.palette_entries]
+
+        return {
+            'sliders': slider_values,
+            'invert_state': bool(self.invert_state.get()),
+            'crop_values': {
+                'left': self.crop_left_var.get(),
+                'right': self.crop_right_var.get(),
+                'top': self.crop_top_var.get(),
+                'bottom': self.crop_bottom_var.get(),
+            },
+            'crop_preset': self.crop_preset_var.get(),
+            'export_compression': self.export_compression_var.get(),
+            'folder_path': self.folder_path.get(),
+            'blend_image_pil': self.blend_image_pil,
+            'blend_filename': self.blend_filename_var.get(),
+            'palette_entries': palette_entries,
+            'palette_status': self.palette_status_var.get(),
+            'palette_format': self.palette_format_var.get(),
+            'palette_sort': self.palette_sort_var.get(),
+            'selected_tab': selected_tab,
+        }
+
+    def _restore_ui_state(self, state):
+        """
+        Restore widget state after a themed UI rebuild.
+        """
+        self.begin_bulk_update()
+        try:
+            for name, value in state['sliders'].items():
+                if hasattr(self, name):
+                    getattr(self, name).set(value)
+
+            self.invert_state.set(state['invert_state'])
+            self.export_compression_var.set(state['export_compression'])
+            self.folder_path.set(state['folder_path'])
+            self.blend_image_pil = state['blend_image_pil']
+            self.blend_filename_var.set(state['blend_filename'])
+            self.palette_format_var.set(state['palette_format'])
+            self.palette_sort_var.set(state['palette_sort'])
+
+            self._sync_crop_controls_to_image(reset_values=True)
+            left = int(float(state['crop_values']['left'])) if state['crop_values']['left'] else 0
+            right = int(float(state['crop_values']['right'])) if state['crop_values']['right'] else 0
+            top = int(float(state['crop_values']['top'])) if state['crop_values']['top'] else 0
+            bottom = int(float(state['crop_values']['bottom'])) if state['crop_values']['bottom'] else 0
+            self._set_crop_controls(left, right, top, bottom)
+            self._normalize_crop_controls()
+            self._set_crop_preset_value(state['crop_preset'])
+        finally:
+            self.end_bulk_update(refresh=False)
+
+        self.palette_entries = state['palette_entries']
+        self.palette_status_var.set(state['palette_status'])
+        if self.palette_entries:
+            self.update_palette_display()
+        else:
+            self._reset_palette_output(state['palette_status'])
+
         self._refresh_animation_preview_strip()
-        self._render_empty_preview()
+
+        if hasattr(self, 'controls_notebook'):
+            try:
+                self.controls_notebook.select(state['selected_tab'])
+            except tk.TclError:
+                pass
+
+        if self.image_object is not None and self.current_pil_image is not None:
+            self.apply_pipeline()
+        else:
+            self._render_empty_preview()
+
+    def set_theme(self, theme_name):
+        """
+        Apply a named theme and rebuild the interface.
+        """
+        if theme_name not in self.themes:
+            return
+
+        state = self._capture_ui_state() if hasattr(self, 'app_shell') else None
+        self.theme_name_var.set(theme_name)
+        self.theme = self.themes[theme_name]
+        self._build_ui_shell()
+
+        if state is not None:
+            self._restore_ui_state(state)
+
+    def open_app_settings(self):
+        """
+        Open app settings, including theme selection.
+        """
+        win = tk.Toplevel(self.root)
+        win.title("Settings")
+        win.configure(bg=self.theme["panel"])
+        win.transient(self.root)
+        win.grab_set()
+        win.resizable(False, False)
+
+        tk.Label(
+            win,
+            text="Theme",
+            fg=self.theme["text"],
+            bg=self.theme["panel"],
+            anchor="w"
+        ).grid(row=0, column=0, sticky="w", padx=12, pady=(12, 4))
+
+        theme_var = tk.StringVar(value=self.theme_name_var.get())
+        theme_menu = tk.OptionMenu(win, theme_var, *self.themes.keys())
+        self._style_option_menu(theme_menu)
+        theme_menu.grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 12))
+
+        button_row = tk.Frame(win, bg=self.theme["panel"])
+        button_row.grid(row=2, column=0, sticky="e", padx=12, pady=(0, 12))
+
+        def apply_and_close():
+            selected_theme = theme_var.get()
+            win.destroy()
+            self.set_theme(selected_theme)
+
+        tk.Button(button_row, text="Cancel", command=win.destroy, **self._button_style(self.theme["button"])).pack(side=tk.LEFT, padx=(0, 6))
+        tk.Button(button_row, text="Apply", command=apply_and_close, **self._button_style(self.theme["button_alt"])).pack(side=tk.LEFT)
 
     def _configure_notebook_style(self):
         """
-        Configure a compact dark notebook style for the right sidebar tabs.
+        Configure a compact classic notebook style for the right sidebar tabs.
         """
         style = ttk.Style(self.root)
         try:
-            style.theme_use("clam")
+            style.theme_use("classic")
         except tk.TclError:
             pass
 
-        style.configure("Weird.TNotebook", background=self.theme["bg"], borderwidth=0, tabmargins=(0, 0, 0, 0))
+        style.configure(
+            "Weird.TNotebook",
+            background=self.theme["bg"],
+            borderwidth=1,
+            tabmargins=(2, 2, 2, 0)
+        )
         style.configure(
             "Weird.TNotebook.Tab",
-            background=self.theme["panel_soft"],
-            foreground=self.theme["muted"],
-            padding=(14, 8),
-            borderwidth=0,
-            focuscolor=self.theme["panel_soft"],
+            background=self.theme["panel"],
+            foreground=self.theme["text"],
+            padding=(12, 6),
+            borderwidth=1,
+            relief="raised",
+            focuscolor=self.theme["panel"],
         )
         style.map(
             "Weird.TNotebook.Tab",
-            background=[("selected", self.theme["accent_soft"]), ("active", self.theme["panel_alt"])],
+            background=[("selected", self.theme["panel_alt"]), ("active", self.theme["panel_soft"])],
             foreground=[("selected", self.theme["text"]), ("active", self.theme["text"])],
         )
 
@@ -157,7 +419,15 @@ class App:
             command=self.open_randomize_settings,
             **self._button_style(self.theme["button_alt"])
         )
-        self.randomize_settings_button.pack(side=tk.LEFT)
+        self.randomize_settings_button.pack(side=tk.LEFT, padx=(0, 8))
+
+        self.settings_button = tk.Button(
+            actions,
+            text="Settings",
+            command=self.open_app_settings,
+            **self._button_style(self.theme["button"])
+        )
+        self.settings_button.pack(side=tk.LEFT)
 
     def _build_preview_panel(self):
         """
@@ -185,9 +455,9 @@ class App:
         self.canvas_wrap = tk.Frame(
             preview_body,
             bg=self.theme["canvas"],
-            highlightbackground=self.theme["border"],
-            highlightthickness=1,
-            bd=0
+            relief=tk.SUNKEN,
+            bd=2,
+            highlightthickness=0,
         )
         self.canvas_wrap.configure(width=430, height=430)
         self.canvas_wrap.pack_propagate(False)
@@ -197,7 +467,7 @@ class App:
             self.canvas_wrap,
             width=400,
             height=400,
-            bg=self.theme["canvas"],
+            bg="#000000",
             bd=0,
             highlightthickness=0
         )
@@ -669,14 +939,14 @@ class App:
 
     def _create_card(self, parent, title, subtitle=None, stretch=False):
         """
-        Create a modern dark card container and return the card plus its body frame.
+        Create a classic desktop group container and return the card plus its body frame.
         """
         card = tk.Frame(
             parent,
             bg=self.theme["panel"],
-            highlightbackground=self.theme["border"],
-            highlightthickness=1,
-            bd=0
+            relief=tk.RAISED,
+            bd=2,
+            highlightthickness=0,
         )
         if stretch:
             card.grid_propagate(True)
@@ -1147,8 +1417,10 @@ class App:
             fg=text_color,
             activebackground=active_bg,
             activeforeground=text_color,
-            highlightthickness=0,
-            bd=0,
+            highlightthickness=1,
+            highlightbackground=self.theme["border"],
+            bd=2,
+            relief=tk.RAISED,
             width=14,
             anchor="w"
         )
@@ -1162,11 +1434,11 @@ class App:
             "bg": self.theme["field"],
             "fg": self.theme["text"],
             "insertbackground": self.theme["text"],
-            "relief": tk.FLAT,
+            "relief": tk.SUNKEN,
             "highlightthickness": 1,
             "highlightbackground": self.theme["field_border"],
             "highlightcolor": self.theme["accent"],
-            "bd": 0,
+            "bd": 2,
         }
 
     def _create_compact_slider(self, parent, label_text, from_, to, command, resolution=1, initial=0, formatter=None):
@@ -1206,8 +1478,9 @@ class App:
             troughcolor=self.theme["button_alt"],
             activebackground=self.theme["accent"],
             highlightthickness=0,
-            bd=0,
-            sliderlength=14,
+            bd=1,
+            relief=tk.FLAT,
+            sliderlength=18,
             width=10,
             command=command,
         )
@@ -1249,8 +1522,9 @@ class App:
             troughcolor=self.theme["button_alt"],
             activebackground=self.theme["accent"],
             highlightthickness=0,
-            bd=0,
-            sliderlength=14,
+            bd=1,
+            relief=tk.FLAT,
+            sliderlength=18,
             width=10,
             showvalue=False,
             command=lambda _value: self.update_crop(edge)
@@ -1306,16 +1580,16 @@ class App:
 
     def _button_style(self, background):
         """
-        Shared button styling for the dark UI.
+        Shared button styling for the classic UI.
         """
         if self.is_macos:
-            background = "#d7dbe4" if background != self.theme["accent_soft"] else "#c7d5ff"
+            background = "#d4d0c8" if background != self.theme["accent_soft"] else "#dbe7f7"
             foreground = "#11131a"
-            active_background = "#c8cfdb" if background != "#c7d5ff" else "#b8c9ff"
+            active_background = "#c6c1b8" if background != "#dbe7f7" else "#c8d8f2"
             disabled_foreground = "#5f6776"
         else:
             foreground = self.theme["text"]
-            active_background = background
+            active_background = self.theme["panel_alt"]
             disabled_foreground = foreground
 
         return {
@@ -1324,9 +1598,10 @@ class App:
             "activebackground": active_background,
             "activeforeground": foreground,
             "disabledforeground": disabled_foreground,
-            "highlightbackground": background,
-            "bd": 0,
-            "relief": tk.FLAT,
+            "highlightbackground": self.theme["shadow_light"],
+            "highlightcolor": self.theme["shadow_light"],
+            "bd": 2,
+            "relief": tk.RAISED,
             "padx": 12,
             "pady": 8,
         }
@@ -1517,7 +1792,7 @@ class App:
         formats = self._get_animation_export_formats()
         modal = tk.Toplevel(self.root)
         modal.title("Export Animation")
-        modal.configure(bg="#2e2e2e")
+        modal.configure(bg=self.theme["panel"])
         modal.transient(self.root)
         modal.grab_set()
         modal.resizable(False, False)
@@ -1528,39 +1803,40 @@ class App:
         tk.Label(
             modal,
             text=f"Frames: {len(self.animation_frames)}\nFrames with different sizes will be padded to the first frame when exported.",
-            fg="#c8c8c8", bg="#2e2e2e",
+            fg=self.theme["muted"], bg=self.theme["panel"],
             justify=tk.LEFT
         ).grid(row=0, column=0, columnspan=2, sticky="w", padx=12, pady=(12, 8))
 
-        tk.Label(modal, text="Format:", fg="white", bg="#2e2e2e").grid(row=1, column=0, sticky="w", padx=12, pady=4)
+        tk.Label(modal, text="Format:", fg=self.theme["text"], bg=self.theme["panel"]).grid(row=1, column=0, sticky="w", padx=12, pady=4)
         format_menu = tk.OptionMenu(modal, format_var, *formats.keys())
-        format_menu.configure(bg="#444", fg="white", activebackground="#555", activeforeground="white", highlightthickness=0)
-        format_menu["menu"].configure(bg="#444", fg="white")
+        self._style_option_menu(format_menu)
         format_menu.grid(row=1, column=1, sticky="ew", padx=12, pady=4)
 
-        tk.Label(modal, text="FPS:", fg="white", bg="#2e2e2e").grid(row=2, column=0, sticky="w", padx=12, pady=4)
+        tk.Label(modal, text="FPS:", fg=self.theme["text"], bg=self.theme["panel"]).grid(row=2, column=0, sticky="w", padx=12, pady=4)
         fps_spinbox = tk.Spinbox(
             modal,
             from_=1,
             to=60,
             textvariable=fps_var,
             width=8,
-            bg="#444",
-            fg="white",
-            insertbackground="white",
-            buttonbackground="#555"
+            bg=self.theme["field"],
+            fg=self.theme["text"],
+            insertbackground=self.theme["text"],
+            buttonbackground=self.theme["button"],
+            relief=tk.SUNKEN,
+            bd=2
         )
         fps_spinbox.grid(row=2, column=1, sticky="w", padx=12, pady=4)
 
-        button_row = tk.Frame(modal, bg="#2e2e2e")
+        button_row = tk.Frame(modal, bg=self.theme["panel"])
         button_row.grid(row=3, column=0, columnspan=2, sticky="e", padx=12, pady=(12, 12))
 
-        tk.Button(button_row, text="Cancel", command=modal.destroy, **self._button_style("#444")).pack(side=tk.LEFT, padx=(0, 6))
+        tk.Button(button_row, text="Cancel", command=modal.destroy, **self._button_style(self.theme["button"])).pack(side=tk.LEFT, padx=(0, 6))
         tk.Button(
             button_row,
             text="Export",
             command=lambda: self._export_animation_from_modal(modal, format_var.get(), fps_var.get()),
-            **self._button_style("#666")
+            **self._button_style(self.theme["button_alt"])
         ).pack(side=tk.LEFT)
 
     def _export_animation_from_modal(self, modal, format_name, fps_value):
@@ -2428,7 +2704,7 @@ class App:
         """
         win = tk.Toplevel(self.root)
         win.title("Randomize Settings")
-        win.configure(bg="#2e2e2e")
+        win.configure(bg=self.theme["panel"])
         win.transient(self.root)
         win.grab_set()
 
@@ -2439,7 +2715,16 @@ class App:
 
         row = 0
         for k in left_keys:
-            cb = tk.Checkbutton(win, text=k.replace('_',' ').title(), variable=self.randomize_settings[k], bg="#2e2e2e", fg="white", selectcolor="#444")
+            cb = tk.Checkbutton(
+                win,
+                text=k.replace('_',' ').title(),
+                variable=self.randomize_settings[k],
+                bg=self.theme["panel"],
+                fg=self.theme["text"],
+                activebackground=self.theme["panel"],
+                activeforeground=self.theme["text"],
+                selectcolor=self.theme["field"],
+            )
             cb.grid(row=row, column=0, sticky='w', padx=10, pady=2)
             row += 1
 
@@ -2447,12 +2732,21 @@ class App:
         for k in right_keys:
             if k not in self.randomize_settings:
                 self.randomize_settings[k] = tk.BooleanVar(value=True)
-            cb = tk.Checkbutton(win, text=k.replace('_',' ').title(), variable=self.randomize_settings[k], bg="#2e2e2e", fg="white", selectcolor="#444")
+            cb = tk.Checkbutton(
+                win,
+                text=k.replace('_',' ').title(),
+                variable=self.randomize_settings[k],
+                bg=self.theme["panel"],
+                fg=self.theme["text"],
+                activebackground=self.theme["panel"],
+                activeforeground=self.theme["text"],
+                selectcolor=self.theme["field"],
+            )
             cb.grid(row=row, column=1, sticky='w', padx=10, pady=2)
             row += 1
 
         # Buttons
-        btn_frame = tk.Frame(win, bg="#2e2e2e")
+        btn_frame = tk.Frame(win, bg=self.theme["panel"])
         btn_frame.grid(row=max(len(left_keys), len(right_keys))+1, column=0, columnspan=2, pady=10)
 
         def select_all():
@@ -2463,9 +2757,9 @@ class App:
             for v in self.randomize_settings.values():
                 v.set(False)
 
-        tk.Button(btn_frame, text="Select All", command=select_all, **self._button_style("#444")).pack(side=tk.LEFT, padx=5)
-        tk.Button(btn_frame, text="Deselect All", command=deselect_all, **self._button_style("#444")).pack(side=tk.LEFT, padx=5)
-        tk.Button(btn_frame, text="Close", command=win.destroy, **self._button_style("#666")).pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_frame, text="Select All", command=select_all, **self._button_style(self.theme["button"])).pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_frame, text="Deselect All", command=deselect_all, **self._button_style(self.theme["button"])).pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_frame, text="Close", command=win.destroy, **self._button_style(self.theme["button_alt"])).pack(side=tk.LEFT, padx=5)
 
     def toggle_invert(self):
         """
