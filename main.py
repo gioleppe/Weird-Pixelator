@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog
 import os
-from PIL import Image, ImageTk, ImageFilter
+from PIL import Image, ImageTk, ImageFilter, ImageOps
 import numpy as np
 from image_object import ImageObject
 import image_effects
@@ -31,6 +31,9 @@ class App:
         self.crop_preset_var = tk.StringVar(value="Free")
         self._updating_crop_preset = False
         self.export_compression_var = tk.StringVar(value="No Compression")
+        self.animation_frames = []
+        self.animation_preview_images = []
+        self.animation_status_var = tk.StringVar(value="No frames added yet.")
 
         # Canvas for displaying the image
         self.canvas = tk.Canvas(root, width=400, height=400, bg="gray")
@@ -53,6 +56,7 @@ class App:
         self.main_controls_container.grid_columnconfigure(5, weight=1)
         self.main_controls_container.grid_rowconfigure(0, weight=1)
         self.main_controls_container.grid_rowconfigure(1, weight=1)
+        self.main_controls_container.grid_rowconfigure(2, weight=0)
 
         # --- Pixelate Section ---
         self.pixelate_frame = tk.LabelFrame(
@@ -291,6 +295,79 @@ class App:
             **self._button_style("#444")
         )
         self.reset_crop_button.grid(row=4, column=0, columnspan=4, sticky="ew", padx=5, pady=(8, 0))
+
+        # --- Animation Section ---
+        self.animation_frame = tk.LabelFrame(
+            self.main_controls_container,
+            text="Animation",
+            padx=10, pady=10,
+            fg="white", bg="#2e2e2e",
+            highlightbackground="white", highlightthickness=1
+        )
+        self.animation_frame.grid(row=2, column=0, columnspan=6, sticky="nsew", padx=5, pady=(8, 0))
+        self.animation_frame.grid_columnconfigure(0, weight=1)
+
+        self.animation_button_row = tk.Frame(self.animation_frame, bg="#2e2e2e")
+        self.animation_button_row.grid(row=0, column=0, sticky="ew")
+        self.animation_button_row.grid_columnconfigure(3, weight=1)
+
+        self.add_frame_button = tk.Button(
+            self.animation_button_row,
+            text="Add Frame",
+            command=self.add_animation_frame,
+            **self._button_style("#444")
+        )
+        self.add_frame_button.grid(row=0, column=0, padx=(0, 6), pady=(0, 6), sticky="w")
+
+        self.delete_frame_button = tk.Button(
+            self.animation_button_row,
+            text="Delete Last Frame",
+            command=self.delete_last_animation_frame,
+            **self._button_style("#444")
+        )
+        self.delete_frame_button.grid(row=0, column=1, padx=(0, 6), pady=(0, 6), sticky="w")
+
+        self.export_animation_button = tk.Button(
+            self.animation_button_row,
+            text="Export Animation As",
+            command=self.open_animation_export_modal,
+            **self._button_style("#666")
+        )
+        self.export_animation_button.grid(row=0, column=2, pady=(0, 6), sticky="w")
+
+        self.animation_status_label = tk.Label(
+            self.animation_button_row,
+            textvariable=self.animation_status_var,
+            fg="#c8c8c8", bg="#2e2e2e",
+            anchor="e", justify=tk.RIGHT
+        )
+        self.animation_status_label.grid(row=0, column=3, sticky="e", pady=(0, 6))
+
+        self.animation_preview_canvas = tk.Canvas(
+            self.animation_frame,
+            height=150,
+            bg="#202020",
+            highlightthickness=0,
+            bd=0
+        )
+        self.animation_preview_canvas.grid(row=1, column=0, sticky="ew")
+
+        self.animation_preview_scrollbar = tk.Scrollbar(
+            self.animation_frame,
+            orient=tk.HORIZONTAL,
+            command=self.animation_preview_canvas.xview
+        )
+        self.animation_preview_scrollbar.grid(row=2, column=0, sticky="ew", pady=(6, 0))
+        self.animation_preview_canvas.configure(xscrollcommand=self.animation_preview_scrollbar.set)
+
+        self.animation_preview_inner = tk.Frame(self.animation_preview_canvas, bg="#202020")
+        self.animation_preview_window = self.animation_preview_canvas.create_window(
+            (0, 0),
+            window=self.animation_preview_inner,
+            anchor="nw"
+        )
+        self.animation_preview_inner.bind("<Configure>", self._update_animation_scroll_region)
+        self.animation_preview_canvas.bind("<Configure>", self._resize_animation_preview_window)
 
         # --- Export Compression Section ---
         self.export_frame = tk.LabelFrame(
@@ -534,6 +611,303 @@ class App:
         defaults['legacy_collapse'] = False
         return {key: tk.BooleanVar(value=defaults[key]) for key in keys}
 
+    def _update_animation_status(self):
+        """
+        Refresh the frame counter shown in the animation section.
+        """
+        frame_count = len(self.animation_frames)
+        if frame_count == 0:
+            self.animation_status_var.set("No frames added yet.")
+            return
+
+        first_width, first_height = self.animation_frames[0].size
+        self.animation_status_var.set(f"{frame_count} frame(s) • base {first_width} x {first_height}")
+
+    def _update_animation_scroll_region(self, _event=None):
+        """
+        Keep the animation preview strip scroll region in sync with its content.
+        """
+        self.animation_preview_canvas.configure(scrollregion=self.animation_preview_canvas.bbox("all"))
+
+    def _resize_animation_preview_window(self, event):
+        """
+        Keep the preview strip sized to the available canvas height.
+        """
+        self.animation_preview_canvas.itemconfigure(self.animation_preview_window, height=event.height)
+
+    def _refresh_animation_preview_strip(self):
+        """
+        Rebuild the thumbnail strip for captured animation frames.
+        """
+        for child in self.animation_preview_inner.winfo_children():
+            child.destroy()
+
+        self.animation_preview_images = []
+
+        if not self.animation_frames:
+            empty_label = tk.Label(
+                self.animation_preview_inner,
+                text="Capture frames from the current preview to build an animation.",
+                fg="#9e9e9e", bg="#202020"
+            )
+            empty_label.pack(anchor="w", padx=10, pady=18)
+            self._update_animation_scroll_region()
+            self._update_animation_status()
+            return
+
+        for index, frame in enumerate(self.animation_frames, start=1):
+            tile = tk.Frame(self.animation_preview_inner, bg="#202020", highlightbackground="#555", highlightthickness=1)
+            tile.pack(side=tk.LEFT, padx=(0 if index == 1 else 8, 0), pady=4)
+
+            thumb = frame.copy()
+            thumb.thumbnail((110, 110), Image.LANCZOS)
+            photo = ImageTk.PhotoImage(thumb)
+            self.animation_preview_images.append(photo)
+
+            preview_label = tk.Label(tile, image=photo, bg="#202020")
+            preview_label.pack(padx=8, pady=(8, 4))
+
+            caption = tk.Label(
+                tile,
+                text=f"Frame {index}\n{frame.size[0]} x {frame.size[1]}",
+                fg="white", bg="#202020",
+                justify=tk.CENTER
+            )
+            caption.pack(padx=8, pady=(0, 8))
+
+        self._update_animation_scroll_region()
+        self._update_animation_status()
+
+    def _get_animation_export_formats(self):
+        """
+        Return the supported animation export formats.
+        """
+        return {
+            "GIF": {
+                "extension": ".gif",
+                "filetypes": [("GIF Animation", "*.gif")],
+            },
+            "MP4": {
+                "extension": ".mp4",
+                "filetypes": [("MP4 Video", "*.mp4")],
+            },
+            "Animated WebP": {
+                "extension": ".webp",
+                "filetypes": [("Animated WebP", "*.webp")],
+            },
+        }
+
+    def _prepare_animation_frames(self, target_size=None, flatten_alpha=False):
+        """
+        Normalize captured frames to a shared export size.
+        """
+        if not self.animation_frames:
+            return []
+
+        if target_size is None:
+            target_size = self.animation_frames[0].size
+
+        prepared_frames = []
+        for frame in self.animation_frames:
+            working = frame.convert("RGBA")
+            if working.size != target_size:
+                working = ImageOps.pad(working, target_size, method=Image.LANCZOS, color=(0, 0, 0, 255))
+
+            if flatten_alpha:
+                background = Image.new("RGB", target_size, (0, 0, 0))
+                background.paste(working, mask=working.getchannel("A"))
+                prepared_frames.append(background)
+            else:
+                prepared_frames.append(working)
+
+        return prepared_frames
+
+    def add_animation_frame(self):
+        """
+        Capture the current full-resolution render as the next animation frame.
+        """
+        if self.image_object is None:
+            messagebox.showerror("Error", "Load an image before adding animation frames.")
+            return
+
+        frame_image = self.render_current_image(for_preview=False)
+        if frame_image is None:
+            messagebox.showerror("Error", "Unable to render the current frame.")
+            return
+
+        self.animation_frames.append(frame_image.copy())
+        self._refresh_animation_preview_strip()
+
+    def delete_last_animation_frame(self):
+        """
+        Remove the most recently captured animation frame.
+        """
+        if not self.animation_frames:
+            messagebox.showerror("Error", "There are no animation frames to delete.")
+            return
+
+        self.animation_frames.pop()
+        self._refresh_animation_preview_strip()
+
+    def clear_animation_frames(self):
+        """
+        Remove all captured animation frames.
+        """
+        self.animation_frames.clear()
+        self._refresh_animation_preview_strip()
+
+    def open_animation_export_modal(self):
+        """
+        Open a modal window for choosing animation export settings.
+        """
+        if not self.animation_frames:
+            messagebox.showerror("Error", "Add at least one frame before exporting an animation.")
+            return
+
+        formats = self._get_animation_export_formats()
+        modal = tk.Toplevel(self.root)
+        modal.title("Export Animation")
+        modal.configure(bg="#2e2e2e")
+        modal.transient(self.root)
+        modal.grab_set()
+        modal.resizable(False, False)
+
+        format_var = tk.StringVar(value="GIF")
+        fps_var = tk.IntVar(value=8)
+
+        tk.Label(
+            modal,
+            text=f"Frames: {len(self.animation_frames)}\nFrames with different sizes will be padded to the first frame when exported.",
+            fg="#c8c8c8", bg="#2e2e2e",
+            justify=tk.LEFT
+        ).grid(row=0, column=0, columnspan=2, sticky="w", padx=12, pady=(12, 8))
+
+        tk.Label(modal, text="Format:", fg="white", bg="#2e2e2e").grid(row=1, column=0, sticky="w", padx=12, pady=4)
+        format_menu = tk.OptionMenu(modal, format_var, *formats.keys())
+        format_menu.configure(bg="#444", fg="white", activebackground="#555", activeforeground="white", highlightthickness=0)
+        format_menu["menu"].configure(bg="#444", fg="white")
+        format_menu.grid(row=1, column=1, sticky="ew", padx=12, pady=4)
+
+        tk.Label(modal, text="FPS:", fg="white", bg="#2e2e2e").grid(row=2, column=0, sticky="w", padx=12, pady=4)
+        fps_spinbox = tk.Spinbox(
+            modal,
+            from_=1,
+            to=60,
+            textvariable=fps_var,
+            width=8,
+            bg="#444",
+            fg="white",
+            insertbackground="white",
+            buttonbackground="#555"
+        )
+        fps_spinbox.grid(row=2, column=1, sticky="w", padx=12, pady=4)
+
+        button_row = tk.Frame(modal, bg="#2e2e2e")
+        button_row.grid(row=3, column=0, columnspan=2, sticky="e", padx=12, pady=(12, 12))
+
+        tk.Button(button_row, text="Cancel", command=modal.destroy, **self._button_style("#444")).pack(side=tk.LEFT, padx=(0, 6))
+        tk.Button(
+            button_row,
+            text="Export",
+            command=lambda: self._export_animation_from_modal(modal, format_var.get(), fps_var.get()),
+            **self._button_style("#666")
+        ).pack(side=tk.LEFT)
+
+    def _export_animation_from_modal(self, modal, format_name, fps_value):
+        """
+        Validate modal settings and export the animation.
+        """
+        formats = self._get_animation_export_formats()
+        format_info = formats.get(format_name)
+        if format_info is None:
+            messagebox.showerror("Error", "Unsupported animation format.")
+            return
+
+        try:
+            fps = max(1, min(60, int(fps_value)))
+        except (TypeError, ValueError):
+            messagebox.showerror("Error", "FPS must be a whole number between 1 and 60.")
+            return
+
+        initial_dir = self.folder_path.get().strip() or os.getcwd()
+        file_path = filedialog.asksaveasfilename(
+            title="Export Animation",
+            defaultextension=format_info["extension"],
+            filetypes=format_info["filetypes"],
+            initialdir=initial_dir,
+            initialfile=f"Weird_Pixellator_Animation{format_info['extension']}"
+        )
+        if not file_path:
+            return
+
+        try:
+            self.export_animation(file_path, format_name, fps)
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to export animation: {e}")
+            return
+
+        modal.destroy()
+        messagebox.showinfo("Success", f"Animation exported to {file_path}")
+
+    def export_animation(self, file_path, format_name, fps):
+        """
+        Export the captured frame sequence to the selected animation format.
+        """
+        if not self.animation_frames:
+            raise ValueError("No animation frames available.")
+
+        duration_ms = max(1, int(round(1000 / max(1, fps))))
+        base_width, base_height = self.animation_frames[0].size
+
+        if format_name == "GIF":
+            frames = self._prepare_animation_frames(target_size=(base_width, base_height), flatten_alpha=False)
+            frames[0].save(
+                file_path,
+                save_all=True,
+                append_images=frames[1:],
+                duration=duration_ms,
+                loop=0,
+                disposal=2
+            )
+            return
+
+        if format_name == "Animated WebP":
+            frames = self._prepare_animation_frames(target_size=(base_width, base_height), flatten_alpha=False)
+            frames[0].save(
+                file_path,
+                format="WEBP",
+                save_all=True,
+                append_images=frames[1:],
+                duration=duration_ms,
+                loop=0,
+                lossless=True,
+                quality=90,
+                method=6
+            )
+            return
+
+        if format_name == "MP4":
+            try:
+                import imageio.v2 as imageio
+            except ImportError as exc:
+                raise RuntimeError("MP4 export requires the imageio packages from requirements.txt.") from exc
+
+            video_size = (base_width + (base_width % 2), base_height + (base_height % 2))
+            frames = self._prepare_animation_frames(target_size=video_size, flatten_alpha=True)
+            with imageio.get_writer(
+                file_path,
+                fps=fps,
+                codec="libx264",
+                quality=8,
+                pixelformat="yuv420p",
+                macro_block_size=1
+            ) as writer:
+                for frame in frames:
+                    writer.append_data(np.array(frame))
+            return
+
+        raise ValueError(f"Unsupported export format: {format_name}")
+
     def _reset_controls_for_new_image(self):
         """
         Reset all effect controls so a newly loaded image starts clean.
@@ -569,6 +943,7 @@ class App:
             self.blend_filename_var.set("No file")
             self.export_compression_var.set("No Compression")
             self._sync_crop_controls_to_image(reset_values=True)
+            self.clear_animation_frames()
 
             self.pipeline_image = None
             self.full_resolution_image = None

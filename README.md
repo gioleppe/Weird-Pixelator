@@ -1,6 +1,6 @@
 # Weird Pixelator
 
-Weird Pixelator is a desktop image tool for glitch art, color manipulation, blending, CRT effects, crop controls, and retro export compression.
+Weird Pixelator is a desktop image tool for glitch art, color manipulation, blending, CRT effects, crop controls, retro export compression, and simple frame-by-frame animation export.
 
 ## Features
 
@@ -10,6 +10,7 @@ Weird Pixelator is a desktop image tool for glitch art, color manipulation, blen
 - four-edge crop with live size readout and presets
 - blend image overlay
 - save/export with retro compression profiles
+- frame capture strip with GIF, MP4, and animated WebP export
 - randomized effect generation
 
 ## Run locally
