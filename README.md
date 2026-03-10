@@ -39,8 +39,10 @@ The project ignores local and generated files such as:
 - `.venv/`
 - `build/`
 - `dist/`
-- generated macOS icon assets
 
 ## License
 
-No license file has been added yet.
+This project is source-available under the custom non-commercial license in
+[LICENSE](LICENSE).
+
+Commercial use and resale are not allowed without prior written permission.
