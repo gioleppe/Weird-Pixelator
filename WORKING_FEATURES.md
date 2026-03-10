@@ -47,7 +47,7 @@ Use the `Adjust` tab to shape the main look of the image:
 The preview updates automatically while controls change.
 
 ### 3. Apply finishing effects
-Use the `Finish` tab to add CRT-style display effects and preview-only camera/compression emulation.
+Use the `Finish` tab to add CRT-style display effects and camera/compression emulation.
 
 ### 4. Optionally crop the image
 Use the `Crop` tab to trim the image or force a specific aspect ratio.
