@@ -1,0 +1,14 @@
+.DS_Store
+*.pyc
+__pycache__/
+
+.venv/
+build/
+dist/
+
+assets/icon.iconset/
+assets/icon.icns
+
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
