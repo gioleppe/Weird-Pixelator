@@ -40,6 +40,8 @@ class App:
         self.palette_status_var = tk.StringVar(value="Load an image and extract a palette from the preview.")
         self.palette_format_var = tk.StringVar(value="HEX File")
         self.palette_sort_var = tk.StringVar(value="Frequency")
+        self.bend_mode_var = tk.StringVar(value="Byte Shift")
+        self.datamosh_mode_var = tk.StringVar(value="AVI Style")
         self.theme_name_var = tk.StringVar(value="Classic Gray")
         self.invert_state = tk.BooleanVar(value=False)
         self.folder_path = tk.StringVar()
@@ -199,7 +201,7 @@ class App:
         slider_names = [
             'pixel_slider', 'jitter_slider', 'block_slider', 'sort_slider',
             'hue_slider', 'saturation_slider', 'contrast_slider',
-            'random_pixel_slider', 'blur_slider', 'color_reducer_slider', 'legacy_color_slider',
+            'random_pixel_slider', 'blur_slider', 'color_reducer_slider', 'legacy_color_slider', 'bend_slider', 'datamosh_slider',
             'blend_slider', 'curvature_slider', 'distortion_slider', 'glow_slider',
             'noise_slider', 'scanline_slider', 'rgb_shift_slider', 'vignette_slider',
         ]
@@ -235,6 +237,8 @@ class App:
             'palette_status': self.palette_status_var.get(),
             'palette_format': self.palette_format_var.get(),
             'palette_sort': self.palette_sort_var.get(),
+            'bend_mode': self.bend_mode_var.get(),
+            'datamosh_mode': self.datamosh_mode_var.get(),
             'selected_tab': selected_tab,
         }
 
@@ -255,6 +259,8 @@ class App:
             self.blend_filename_var.set(state['blend_filename'])
             self.palette_format_var.set(state['palette_format'])
             self.palette_sort_var.set(state['palette_sort'])
+            self.bend_mode_var.set(state.get('bend_mode', 'Byte Shift'))
+            self.datamosh_mode_var.set(state.get('datamosh_mode', 'AVI Style'))
 
             self._sync_crop_controls_to_image(reset_values=True)
             left = int(float(state['crop_values']['left'])) if state['crop_values']['left'] else 0
@@ -494,18 +500,21 @@ class App:
         self.controls_notebook.grid(row=0, column=0, sticky="nsew")
 
         self.edit_tab = tk.Frame(self.controls_notebook, bg=self.theme["bg"])
+        self.glitch_tab = tk.Frame(self.controls_notebook, bg=self.theme["bg"])
         self.finish_tab = tk.Frame(self.controls_notebook, bg=self.theme["bg"])
         self.crop_tab = tk.Frame(self.controls_notebook, bg=self.theme["bg"])
         self.animate_tab = tk.Frame(self.controls_notebook, bg=self.theme["bg"])
         self.palette_tab = tk.Frame(self.controls_notebook, bg=self.theme["bg"])
 
         self.controls_notebook.add(self.edit_tab, text="Adjust")
+        self.controls_notebook.add(self.glitch_tab, text="Glitch")
         self.controls_notebook.add(self.finish_tab, text="Finish")
         self.controls_notebook.add(self.crop_tab, text="Crop")
         self.controls_notebook.add(self.animate_tab, text="Animate")
         self.controls_notebook.add(self.palette_tab, text="Palette")
 
         self._build_adjust_tab()
+        self._build_glitch_tab()
         self._build_finish_tab()
         self._build_crop_tab()
         self._build_animation_tab()
@@ -631,6 +640,58 @@ class App:
             resolution=0.01,
             initial=0.0,
             formatter=lambda value: f"{float(value):.2f}"
+        )
+
+    def _build_glitch_tab(self):
+        """
+        Build databending and datamoshing controls.
+        """
+        self.glitch_tab.grid_columnconfigure(0, weight=1)
+        self.glitch_tab.grid_columnconfigure(1, weight=1)
+
+        self.bending_frame, bending_body = self._create_card(self.glitch_tab, "Bending")
+        self.bending_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 6), pady=(0, 8))
+        tk.Label(bending_body, text="Mode", fg=self.theme["text"], bg=self.theme["panel"], anchor="w").pack(fill=tk.X)
+        self.bend_mode_menu = tk.OptionMenu(
+            bending_body,
+            self.bend_mode_var,
+            "Byte Shift",
+            "Byte Swap",
+            "Repeat Burst",
+            command=self.update_bending,
+        )
+        self._style_option_menu(self.bend_mode_menu)
+        self.bend_mode_menu.pack(fill=tk.X, pady=(4, 8))
+        self.bend_slider = self._create_compact_slider(
+            bending_body,
+            "Corruption",
+            0,
+            100,
+            self.update_bending,
+            initial=0,
+        )
+
+        self.datamosh_frame, datamosh_body = self._create_card(self.glitch_tab, "Data Moshing")
+        self.datamosh_frame.grid(row=0, column=1, sticky="nsew", padx=(6, 0), pady=(0, 8))
+        tk.Label(datamosh_body, text="Mode", fg=self.theme["text"], bg=self.theme["panel"], anchor="w").pack(fill=tk.X)
+        self.datamosh_mode_menu = tk.OptionMenu(
+            datamosh_body,
+            self.datamosh_mode_var,
+            "AVI Style",
+            "P-Frame Smear",
+            "Block Echo",
+            "Reverse",
+            command=self.update_datamosh,
+        )
+        self._style_option_menu(self.datamosh_mode_menu)
+        self.datamosh_mode_menu.pack(fill=tk.X, pady=(4, 8))
+        self.datamosh_slider = self._create_compact_slider(
+            datamosh_body,
+            "Intensity",
+            0,
+            100,
+            self.update_datamosh,
+            initial=0,
         )
 
     def _build_finish_tab(self):
@@ -1613,7 +1674,7 @@ class App:
         keys = [
             'pixel_scale', 'jitter', 'block', 'sort',
             'hue', 'saturation', 'contrast', 'invert',
-            'random_pixels', 'blur', 'color_reducer', 'legacy_collapse', 'blend',
+            'random_pixels', 'blur', 'color_reducer', 'legacy_collapse', 'bending', 'datamosh', 'blend',
             'curvature', 'distortion', 'glow', 'noise', 'rgb_shift', 'scanlines', 'vignette',
             'compression'
         ]
@@ -1621,6 +1682,8 @@ class App:
         defaults['random_pixels'] = False
         defaults['blur'] = False
         defaults['legacy_collapse'] = False
+        defaults['bending'] = False
+        defaults['datamosh'] = False
         return {key: tk.BooleanVar(value=defaults[key]) for key in keys}
 
     def _update_animation_status(self):
@@ -1955,6 +2018,10 @@ class App:
             self.blur_slider.set(0)
             self.color_reducer_slider.set(256)
             self.legacy_color_slider.set(256)
+            self.bend_slider.set(0)
+            self.bend_mode_var.set("Byte Shift")
+            self.datamosh_slider.set(0)
+            self.datamosh_mode_var.set("AVI Style")
 
             self.curvature_slider.set(0)
             self.distortion_slider.set(0)
@@ -2444,6 +2511,18 @@ class App:
         """
         self.request_preview_update()
 
+    def update_bending(self, _=None):
+        """
+        Updates the databending effect.
+        """
+        self.request_preview_update()
+
+    def update_datamosh(self, _=None):
+        """
+        Updates the datamoshing effect.
+        """
+        self.request_preview_update()
+
     def process_effects_on_image(self, pil_img):
         """
         Apply the current UI-controlled effects to a given PIL image and return the result.
@@ -2493,6 +2572,22 @@ class App:
         # Apply legacy collapse if requested
         if legacy_bins < 256:
             img = image_effects.reduce_colors_legacy(img, legacy_bins)
+
+        try:
+            bend_amount = float(self.bend_slider.get())
+        except Exception:
+            bend_amount = 0.0
+
+        if bend_amount > 0.0:
+            img = image_effects.apply_data_bending(img, bend_amount, self.bend_mode_var.get())
+
+        try:
+            datamosh_amount = float(self.datamosh_slider.get())
+        except Exception:
+            datamosh_amount = 0.0
+
+        if datamosh_amount > 0.0:
+            img = image_effects.apply_datamosh(img, datamosh_amount, self.datamosh_mode_var.get())
 
         # Random pixelization (applies to RGB only)
         try:
@@ -2658,6 +2753,12 @@ class App:
                 self.color_reducer_slider.set(random.randint(2, 256))
             if get('legacy_collapse'):
                 self.legacy_color_slider.set(random.randint(2, 256))
+            if get('bending'):
+                self.bend_slider.set(random.randint(0, 75))
+                self.bend_mode_var.set(random.choice(["Byte Shift", "Byte Swap", "Repeat Burst"]))
+            if get('datamosh'):
+                self.datamosh_slider.set(random.randint(0, 80))
+                self.datamosh_mode_var.set(random.choice(["AVI Style", "P-Frame Smear", "Block Echo", "Reverse"]))
 
             # CRT group
             if get('curvature'):
