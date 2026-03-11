@@ -21,6 +21,18 @@ Weird Pixelator is a desktop image tool for glitch art, color manipulation, blen
 3. Start the app:
    - `python main.py`
 
+## Build Windows app
+
+Use the included build script from PowerShell:
+
+- `.\scripts\build_windows.ps1`
+
+The script uses the checked-in source icon:
+
+- `icon.ico`
+
+The packaged app and a ready-to-upload zip are created in `dist/`.
+
 ## Build macOS app
 
 Use the included build script:

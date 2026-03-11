@@ -89,22 +89,30 @@ pip install -r requirements-build.txt
 
 ## Example PyInstaller commands
 
-Use these from the project root.
+Use these from the project root. Prefer the build scripts below — these are shown for reference only.
 
 ### Windows
 
-```bash
-pyinstaller --noconfirm --windowed --name "Weird Pixelator" main.py
+```powershell
+pyinstaller --noconfirm --windowed --icon icon.ico --name "Weird Pixelator" main.py
+```
+
+Use the build script instead:
+
+```powershell
+.\scripts\build_windows.ps1
 ```
 
 Output to upload:
 
-- the generated `dist/Weird Pixelator/` folder, zipped
+- `dist\Weird Pixelator Windows.zip` (contains the `Weird Pixelator\` folder)
 
 ### macOS
 
+Use the build script:
+
 ```bash
-pyinstaller --noconfirm --windowed --name "Weird Pixelator" main.py
+./scripts/build_macos.sh
 ```
 
 Output to upload:
